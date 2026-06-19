@@ -159,6 +159,18 @@ document.addEventListener('DOMContentLoaded', () => {
             opt.textContent = m.text;
             translationModelSelect.appendChild(opt);
         });
+
+        // Hiện/Ẩn tuỳ chọn agentic workflow cho OpenRouter
+        const agenticContainer = document.getElementById('agentic-option-container');
+        const agenticCheckbox = document.getElementById('use-agentic-checkbox');
+        if (agenticContainer && agenticCheckbox) {
+            if (provider === 'openrouter') {
+                agenticContainer.classList.remove('d-none');
+            } else {
+                agenticContainer.classList.add('d-none');
+                agenticCheckbox.checked = false;
+            }
+        }
     }
 
     aiProviderSelect.addEventListener('change', handleProviderChange);
@@ -677,13 +689,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const glossaryIdVal = translationGlossarySelect.value;
+            const useAgenticCheckbox = document.getElementById('use-agentic-checkbox');
+            const useAgentic = useAgenticCheckbox ? useAgenticCheckbox.checked : false;
+
             const requestBody = {
                 text: extractedNovelText,
                 api_key: apiKey,
                 model: model,
                 source_lang: sourceLang,
                 target_lang: targetLang,
-                provider: provider
+                provider: provider,
+                use_agentic: useAgentic
             };
 
             if (glossaryIdVal) {
