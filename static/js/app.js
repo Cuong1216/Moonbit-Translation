@@ -49,6 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const translationGlossarySelect = document.getElementById('translation-glossary-select');
 
     let currentCollectionId = null;
+    let currentSessionId = null;
+    let eventSource = null;
 
     function escapeHtml(text) {
         if (!text) return "";
@@ -525,97 +527,113 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    async function readTranslationStream(response) {
-        // Stream Reader setup
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            // Decode current chunk and append to buffer
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split("\n");
-            
-            // Keep the last partial line in the buffer
-            buffer = lines.pop();
-
-            for (const line of lines) {
-                const trimmedLine = line.trim();
-                if (!trimmedLine) continue;
-
-                if (trimmedLine.startsWith("data: ")) {
-                    const rawData = trimmedLine.substring(6);
-                    try {
-                        const eventData = JSON.parse(rawData);
-
-                        // Update Progress Bar
-                        const progress = eventData.progress || 0;
-                        translationProgressBar.style.width = `${progress}%`;
-                        translationProgressBar.setAttribute('aria-valuenow', progress);
-                        translationPercentage.textContent = `${progress}%`;
-                        translationStatusText.textContent = eventData.status;
-
-                        // Handle Events
-                        if (eventData.event === 'translating') {
-                            // Just status update
-                        } else if (eventData.event === 'chunk_completed') {
-                            const translatedPart = eventData.translated_chunk;
-                            const sourcePart = eventData.source_chunk || "";
-                            
-                            // Tạo hàng tr và append vào bảng
-                            const tr = document.createElement('tr');
-                            tr.innerHTML = `
-                                <td style="vertical-align: top; padding: 10px;">
-                                    <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
-                                </td>
-                                <td style="vertical-align: top; padding: 10px;">
-                                    <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
-                                </td>
-                            `;
-                            splitScreenBody.appendChild(tr);
-
-                            // Tự động cuộn xuống dưới cùng của container chứa bảng
-                            const container = splitScreenTable.parentElement;
-                            container.scrollTop = container.scrollHeight;
-                            
-                            // Để dự phòng, vẫn cộng dồn vào fullTranslationText
-                            fullTranslationText += (fullTranslationText ? "\n\n" : "") + translatedPart;
-                        } else if (eventData.event === 'paused') {
-                            // UI Pause state
-                            translationStatusText.textContent = "Đã tạm dừng dịch thuật.";
-                            btnPauseTranslation.innerHTML = '<i class="fa-solid fa-play"></i> Tiếp tục';
-                            btnPauseTranslation.className = "btn btn-success py-2 fw-semibold d-flex align-items-center justify-content-center gap-2";
-                            btnPauseTranslation.disabled = false;
-                            return; // Stop processing this stream
-                        } else if (eventData.event === 'completed') {
-                            if (eventData.full_translation && splitScreenBody.children.length === 0) {
-                                fullTranslationText = eventData.full_translation;
-                            }
-                            
-                            // Show download action button
-                            downloadActionsPanel.classList.remove('d-none');
-                            btnStartTranslation.disabled = false;
-                            btnPauseTranslation.classList.add('d-none');
-                            alert("Chúc mừng! Đã hoàn thành dịch thuật toàn bộ tệp truyện thành công.");
-                        } else if (eventData.event === 'error') {
-                            throw new Error(eventData.error || 'Lỗi xảy ra trong quá trình dịch.');
-                        }
-                    } catch (parseError) {
-                        console.error("Lỗi parse dòng SSE JSON:", parseError, trimmedLine);
-                    }
-                }
-            }
+    function connectStream(sessionId) {
+        if (eventSource) {
+            eventSource.close();
         }
+
+        eventSource = new EventSource(`/api/stream?session_id=${sessionId}`);
+
+        eventSource.onmessage = (event) => {
+            try {
+                const eventData = JSON.parse(event.data);
+
+                // Update Progress Bar
+                const progress = eventData.progress || 0;
+                translationProgressBar.style.width = `${progress}%`;
+                translationProgressBar.setAttribute('aria-valuenow', progress);
+                translationPercentage.textContent = `${progress}%`;
+                translationStatusText.textContent = eventData.status;
+
+                // Handle Events
+                if (eventData.event === 'translating') {
+                    // Cập nhật trạng thái
+                } else if (eventData.event === 'restore_state') {
+                    // Khôi phục giao diện Split-screen
+                    translationPreviewArea.classList.add('d-none');
+                    splitScreenTable.classList.remove('d-none');
+                    splitScreenBody.innerHTML = "";
+
+                    const chunks = eventData.chunks || [];
+                    const translatedChunks = eventData.translated_chunks || [];
+
+                    for (let i = 0; i < chunks.length; i++) {
+                        const sourcePart = chunks[i];
+                        const translatedPart = translatedChunks[i] || "";
+
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td style="vertical-align: top; padding: 10px;">
+                                <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
+                            </td>
+                            <td style="vertical-align: top; padding: 10px;">
+                                <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
+                            </td>
+                        `;
+                        splitScreenBody.appendChild(tr);
+                    }
+
+                    // Tự động cuộn xuống dưới cùng
+                    const container = splitScreenTable.parentElement;
+                    container.scrollTop = container.scrollHeight;
+
+                    // Hiển thị nút Tạm dừng
+                    btnStartTranslation.disabled = true;
+                    btnPauseTranslation.classList.remove('d-none');
+                    btnPauseTranslation.innerHTML = '<i class="fa-solid fa-pause"></i> Tạm dừng';
+                    btnPauseTranslation.className = "btn btn-warning py-2 fw-semibold d-flex align-items-center justify-content-center gap-2";
+                    btnPauseTranslation.disabled = false;
+                } else if (eventData.event === 'chunk_completed') {
+                    const translatedPart = eventData.translated_chunk;
+                    const sourcePart = eventData.source_chunk || "";
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td style="vertical-align: top; padding: 10px;">
+                            <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
+                        </td>
+                        <td style="vertical-align: top; padding: 10px;">
+                            <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
+                        </td>
+                    `;
+                    splitScreenBody.appendChild(tr);
+
+                    const container = splitScreenTable.parentElement;
+                    container.scrollTop = container.scrollHeight;
+
+                    fullTranslationText += (fullTranslationText ? "\n\n" : "") + translatedPart;
+                } else if (eventData.event === 'paused') {
+                    translationStatusText.textContent = "Đã tạm dừng dịch thuật.";
+                    btnPauseTranslation.innerHTML = '<i class="fa-solid fa-play"></i> Tiếp tục';
+                    btnPauseTranslation.className = "btn btn-success py-2 fw-semibold d-flex align-items-center justify-content-center gap-2";
+                    btnPauseTranslation.disabled = false;
+                    eventSource.close();
+                } else if (eventData.event === 'completed') {
+                    if (eventData.full_translation && splitScreenBody.children.length === 0) {
+                        fullTranslationText = eventData.full_translation;
+                    }
+                    downloadActionsPanel.classList.remove('d-none');
+                    btnStartTranslation.disabled = false;
+                    btnPauseTranslation.classList.add('d-none');
+                    sessionStorage.removeItem('current_session_id');
+                    alert("Chúc mừng! Đã hoàn thành dịch thuật toàn bộ tệp truyện thành công.");
+                    eventSource.close();
+                } else if (eventData.event === 'error') {
+                    throw new Error(eventData.error || 'Lỗi xảy ra trong quá trình dịch.');
+                }
+            } catch (parseError) {
+                console.error("Lỗi parse dòng SSE JSON:", parseError);
+            }
+        };
+
+        eventSource.onerror = (err) => {
+            console.error("Lỗi kết nối EventSource:", err);
+            translationStatusText.textContent = "Mất kết nối với server. Đang thử kết nối lại...";
+        };
     }
 
     // Start translation click
     btnStartTranslation.addEventListener('click', async () => {
-        if (!extractedNovelText.strip) {
-            // String extension
-        }
         if (!extractedNovelText || extractedNovelText.trim().length === 0) {
             alert('Vui lòng tải lên tệp truyện cần dịch trước!');
             return;
@@ -648,7 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
         translationProgressBar.style.width = '0%';
         translationProgressBar.setAttribute('aria-valuenow', '0');
         translationPercentage.textContent = '0%';
-        translationStatusText.textContent = "Đang chuẩn bị kết nối API...";
+        translationStatusText.textContent = "Đang khởi tạo phiên dịch thuật...";
         
         // Cấu hình hiển thị bảng Split-screen
         translationPreviewArea.classList.add('d-none');
@@ -688,11 +706,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(errData.detail || 'Lỗi thiết lập phiên dịch.');
             }
 
-            await readTranslationStream(response);
+            const data = await response.json();
+            currentSessionId = data.session_id;
+            sessionStorage.setItem('current_session_id', currentSessionId);
+            
+            // Kết nối SSE qua EventSource
+            connectStream(currentSessionId);
         } catch (e) {
             console.error(e);
             translationStatusText.textContent = `Lỗi: ${e.message}`;
-            translationPreviewArea.textContent += `\n\n[TIẾN TRÌNH THẤT BẠI]: ${e.message}`;
             btnStartTranslation.disabled = false;
             btnPauseTranslation.classList.add('d-none');
             alert(`Lỗi tiến trình: ${e.message}`);
@@ -701,13 +723,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Pause/Resume button handler
     btnPauseTranslation.addEventListener('click', async () => {
+        if (!currentSessionId) return;
         btnPauseTranslation.disabled = true;
         const isPauseAction = btnPauseTranslation.innerText.trim().includes("Tạm dừng");
 
         if (isPauseAction) {
             btnPauseTranslation.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tạm dừng...';
             try {
-                const response = await fetch('/api/pause', {
+                const response = await fetch(`/api/pause?session_id=${currentSessionId}`, {
                     method: 'POST'
                 });
                 const data = await response.json();
@@ -723,12 +746,17 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // Resume
             btnPauseTranslation.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tiếp tục...';
+            const apiKey = globalApiKeyInput.value.trim();
             try {
-                const response = await fetch('/api/resume', {
-                    method: 'POST'
+                const response = await fetch(`/api/resume?session_id=${currentSessionId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ api_key: apiKey })
                 });
+                const data = await response.json();
                 if (!response.ok) {
-                    const data = await response.json();
                     throw new Error(data.detail || 'Không thể tiếp tục dịch.');
                 }
                 
@@ -737,8 +765,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 btnPauseTranslation.className = "btn btn-warning py-2 fw-semibold d-flex align-items-center justify-content-center gap-2";
                 btnPauseTranslation.disabled = false;
                 
-                // Đọc tiếp stream
-                await readTranslationStream(response);
+                // Kết nối lại EventSource nhận stream tiếp
+                connectStream(currentSessionId);
             } catch (e) {
                 console.error(e);
                 alert(`Lỗi khi tiếp tục: ${e.message}`);
@@ -815,4 +843,11 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         triggerExport('docx');
     });
+
+    // Phục hồi kết nối khi F5 tab nếu session đang chạy
+    const savedSessionId = sessionStorage.getItem('current_session_id');
+    if (savedSessionId) {
+        currentSessionId = savedSessionId;
+        connectStream(currentSessionId);
+    }
 });
