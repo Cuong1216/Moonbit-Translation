@@ -398,6 +398,8 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
             key = os.getenv("ANTHROPIC_API_KEY")
         elif provider == "openrouter":
             key = os.getenv("OPENROUTER_API_KEY")
+        elif provider == "ollama":
+            key = "ollama"
 
     if not key:
         raise HTTPException(
@@ -458,6 +460,8 @@ async def translate_chunk_endpoint(request: TranslateChunkRequest, db: Session =
             key = os.getenv("ANTHROPIC_API_KEY")
         elif provider == "openrouter":
             key = os.getenv("OPENROUTER_API_KEY")
+        elif provider == "ollama":
+            key = "ollama"
 
     if not key:
         raise HTTPException(

@@ -196,19 +196,25 @@ document.addEventListener('DOMContentLoaded', () => {
             { value: 'deepseek/deepseek-chat', text: 'DeepSeek V3 (Thông minh & Tối ưu chi phí)' },
             { value: 'meta-llama/llama-3.3-70b-instruct', text: 'Llama 3.3 70B Instruct (Mã nguồn mở mạnh mẽ)' },
             { value: 'google/gemini-2.5-pro', text: 'Gemini 2.5 Pro (Qua OpenRouter)' }
+        ],
+        ollama: [
+            { value: 'llama3', text: 'llama3' },
+            { value: 'qwen2.5', text: 'qwen2.5' }
         ]
     };
 
     const apiKeyStorageKeys = {
         gemini: 'gemini_api_key',
         claude: 'claude_api_key',
-        openrouter: 'openrouter_api_key'
+        openrouter: 'openrouter_api_key',
+        ollama: 'ollama_api_key'
     };
 
     const providerPlaceholders = {
         gemini: 'Nhập Gemini API Key tại đây...',
         claude: 'Nhập Anthropic Claude API Key tại đây...',
-        openrouter: 'Nhập OpenRouter API Key tại đây...'
+        openrouter: 'Nhập OpenRouter API Key tại đây...',
+        ollama: 'Không cần API Key đối với Ollama (mặc định)...'
     };
 
     function handleProviderChange() {
@@ -224,12 +230,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Cập nhật các Model tương ứng với Provider
         translationModelSelect.innerHTML = '';
         const models = modelsByProvider[provider] || [];
-        models.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.value;
-            opt.textContent = m.text;
-            translationModelSelect.appendChild(opt);
-        });
+        if (provider === 'ollama') {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = 'Local Models (Ollama)';
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.value;
+                opt.textContent = m.text;
+                optgroup.appendChild(opt);
+            });
+            translationModelSelect.appendChild(optgroup);
+        } else {
+            models.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.value;
+                opt.textContent = m.text;
+                translationModelSelect.appendChild(opt);
+            });
+        }
 
         // Hiện/Ẩn tuỳ chọn agentic workflow cho OpenRouter
         const agenticContainer = document.getElementById('agentic-option-container');
@@ -741,10 +759,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const apiKey = globalApiKeyInput.value.trim();
-        if (!apiKey) {
+        const provider = aiProviderSelect.value;
+        let apiKey = globalApiKeyInput.value.trim();
+        if (!apiKey && provider !== 'ollama') {
             alert('Vui lòng cấu hình API Key trước khi bắt đầu dịch!');
             return;
+        }
+        if (provider === 'ollama' && !apiKey) {
+            apiKey = 'ollama';
         }
 
         // Sync glossary just in case
@@ -852,7 +874,11 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // Resume
             btnPauseTranslation.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Đang tiếp tục...';
-            const apiKey = globalApiKeyInput.value.trim();
+            const provider = aiProviderSelect.value;
+            let apiKey = globalApiKeyInput.value.trim();
+            if (provider === 'ollama' && !apiKey) {
+                apiKey = 'ollama';
+            }
             try {
                 const response = await fetch(`/api/resume?session_id=${currentSessionId}`, {
                     method: 'POST',
@@ -994,10 +1020,14 @@ document.addEventListener('DOMContentLoaded', () => {
     btnConfirmRetranslate.addEventListener('click', async () => {
         if (!retranslateSourceText || !retranslateTargetTextarea) return;
 
-        const apiKey = globalApiKeyInput.value.trim();
-        if (!apiKey) {
+        const provider = aiProviderSelect.value;
+        let apiKey = globalApiKeyInput.value.trim();
+        if (!apiKey && provider !== 'ollama') {
             alert('Vui lòng cấu hình API Key trước khi dịch lại!');
             return;
+        }
+        if (provider === 'ollama' && !apiKey) {
+            apiKey = 'ollama';
         }
 
         const provider = aiProviderSelect.value;
