@@ -36,11 +36,20 @@ async def startup_event():
     except Exception:
         pass
 
+# Cấu hình Custom StaticFiles để vô hiệu hóa hoàn toàn cache trình duyệt cho static files
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
 # Cấu hình mount thư mục static để phục vụ CSS, JS, Images
 # Thư mục static phải tồn tại trước khi khởi chạy
 os.makedirs("static/css", exist_ok=True)
 os.makedirs("static/js", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", NoCacheStaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
@@ -51,7 +60,10 @@ async def read_index():
     """
     template_path = os.path.join("templates", "index.html")
     if os.path.exists(template_path):
-        return FileResponse(template_path)
+        return FileResponse(
+            template_path, 
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+        )
     return {"error": "Trang index.html không tồn tại trong thư mục templates."}
 
 @app.get("/api/health")
