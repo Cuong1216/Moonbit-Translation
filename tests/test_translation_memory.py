@@ -45,7 +45,7 @@ async def test_translation_memory_caching_flow(clean_tm_records):
         result1 = await translator.translate_chunk(test_text, context)
         
         assert result1 == "Bản dịch đã được cache thành công."
-        mock_api.assert_called_once_with(test_text, context)
+        mock_api.assert_called_once_with(test_text, context, "")
         
         # Kiểm tra dữ liệu đã được lưu trữ trong SQLite
         db = SessionLocal()

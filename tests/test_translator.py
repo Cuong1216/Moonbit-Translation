@@ -248,13 +248,13 @@ async def test_openrouter_translator_agentic_success(mock_openai_class):
     call_args_list = mock_client.chat.completions.create.call_args_list
     first_call_kwargs = call_args_list[0][1]
     assert first_call_kwargs["model"] == "google/gemini-2.5-flash"
-    assert first_call_kwargs["messages"][0]["content"] == "Dịch sát nghĩa đen đoạn văn sau sang Tiếng Việt"
+    assert first_call_kwargs["messages"][0]["content"] == "Dịch sát nghĩa đen đoạn văn sau sang Tiếng Việt. Ngữ cảnh từ các đoạn trước: Không có. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường."
     assert first_call_kwargs["messages"][1]["content"] == "Raw Chinese text"
     
     # Verify second call args
     second_call_kwargs = call_args_list[1][1]
     assert second_call_kwargs["model"] == "meta-llama/llama-3-8b-instruct:free"
-    assert second_call_kwargs["messages"][0]["content"] == "Biên tập lại bản dịch thô sau cho văn phong thuần Việt, giữ nguyên ý nghĩa gốc, sửa lỗi ngữ pháp"
+    assert second_call_kwargs["messages"][0]["content"] == "Biên tập lại bản dịch thô sau cho văn phong thuần Việt, giữ nguyên ý nghĩa gốc, sửa lỗi ngữ pháp. Ngữ cảnh từ các đoạn trước: Không có. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường."
     assert second_call_kwargs["messages"][1]["content"] == "Bản dịch thô sơ"
 
 @patch("asyncio.sleep")
@@ -280,7 +280,7 @@ async def test_openrouter_translator_backoff_retry(mock_openai_class, mock_sleep
     result = await novel_translator.translate_chunk(
         chunk="Hello",
         glossary_dict={},
-        api_key="fake-openrouter-key",
+        api_key="fake-key",
         provider="openrouter",
         use_agentic=False
     )
@@ -288,3 +288,65 @@ async def test_openrouter_translator_backoff_retry(mock_openai_class, mock_sleep
     assert result == "Bản dịch thành công"
     assert mock_client.chat.completions.create.call_count == 3
     mock_sleep.assert_has_calls([call(5), call(10)])
+
+
+@pytest.mark.asyncio
+async def test_translate_full_novel_sliding_window():
+    # We want to test that each chunk is translated sequentially and receives the previous translations as context.
+    calls = []
+    async def mock_translate_chunk(chunk, glossary_dict, api_key, previous_context="", **kwargs):
+        calls.append((chunk, previous_context))
+        return f"Translated {chunk}"
+
+    with patch.object(novel_translator, 'translate_chunk', side_effect=mock_translate_chunk):
+        result = await novel_translator.translate_full_novel(
+            text="Chunk 1\nChunk 2\nChunk 3\nChunk 4\nChunk 5",
+            glossary_dict={},
+            api_key="fake-key",
+            max_chars=10,  # Ensure it splits into individual chunks
+        )
+        
+        # Verify result is concatenated correctly
+        expected_result = "Translated Chunk 1\n\nTranslated Chunk 2\n\nTranslated Chunk 3\n\nTranslated Chunk 4\n\nTranslated Chunk 5"
+        assert result == expected_result
+        
+        # Verify sequential calls and sliding window context (max 3 chunks)
+        # Call 1: "Chunk 1", previous_context=""
+        # Call 2: "Chunk 2", previous_context="Translated Chunk 1"
+        # Call 3: "Chunk 3", previous_context="Translated Chunk 1\n\nTranslated Chunk 2"
+        # Call 4: "Chunk 4", previous_context="Translated Chunk 1\n\nTranslated Chunk 2\n\nTranslated Chunk 3"
+        # Call 5: "Chunk 5", previous_context="Translated Chunk 2\n\nTranslated Chunk 3\n\nTranslated Chunk 4" (Chunk 1 popped out)
+        assert len(calls) == 5
+        assert calls[0] == ("Chunk 1", "")
+        assert calls[1] == ("Chunk 2", "Translated Chunk 1")
+        assert calls[2] == ("Chunk 3", "Translated Chunk 1\n\nTranslated Chunk 2")
+        assert calls[3] == ("Chunk 4", "Translated Chunk 1\n\nTranslated Chunk 2\n\nTranslated Chunk 3")
+        assert calls[4] == ("Chunk 5", "Translated Chunk 2\n\nTranslated Chunk 3\n\nTranslated Chunk 4")
+
+
+@patch("google.generativeai.GenerativeModel")
+@patch("google.generativeai.list_models")
+@pytest.mark.asyncio
+async def test_gemini_translator_with_context(mock_list_models, mock_generative_model):
+    dummy_model = MagicMock()
+    dummy_model.name = "models/gemini-1.5-flash"
+    mock_list_models.return_value = [dummy_model]
+
+    mock_model_instance = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = "Bản dịch tiếng Việt."
+    mock_model_instance.generate_content_async = AsyncMock(return_value=mock_response)
+    mock_generative_model.return_value = mock_model_instance
+
+    result = await novel_translator.translate_chunk(
+        chunk="Hello",
+        glossary_dict={},
+        api_key="fake-key",
+        previous_context="Previously translated paragraph."
+    )
+
+    assert result == "Bản dịch tiếng Việt."
+    kwargs = mock_generative_model.call_args[1]
+    system_instruction = kwargs.get("system_instruction", "")
+    assert "Ngữ cảnh từ các đoạn trước: Previously translated paragraph." in system_instruction
+
