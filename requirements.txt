@@ -7,3 +7,5 @@ EbookLib
 beautifulsoup4
 python-multipart
 python-dotenv
+sqlalchemy
+

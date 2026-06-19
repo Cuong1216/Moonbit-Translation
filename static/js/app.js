@@ -38,6 +38,77 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnDownloadTxt = document.getElementById('btn-download-txt');
     const btnDownloadDocx = document.getElementById('btn-download-docx');
 
+    const splitScreenTable = document.getElementById('split-screen-table');
+    const splitScreenBody = document.getElementById('split-screen-body');
+
+    // Các phần tử quản lý SQLite Glossary
+    const glossaryCollectionSelect = document.getElementById('glossary-collection-select');
+    const btnDeleteCollection = document.getElementById('btn-delete-collection');
+    const newCollectionNameInput = document.getElementById('new-collection-name');
+    const btnCreateCollection = document.getElementById('btn-create-collection');
+    const translationGlossarySelect = document.getElementById('translation-glossary-select');
+
+    let currentCollectionId = null;
+
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    async function loadGlossaryCollections() {
+        try {
+            const response = await fetch('/api/glossaries');
+            if (!response.ok) throw new Error('Không thể tải danh sách bộ thuật ngữ.');
+            const collections = await response.json();
+            
+            // Nạp vào dropdown ở Tab Glossary
+            glossaryCollectionSelect.innerHTML = '<option value="" disabled selected>-- Chọn bộ thuật ngữ --</option>';
+            collections.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col.id;
+                opt.textContent = `${col.name} (${col.term_count} từ)`;
+                glossaryCollectionSelect.appendChild(opt);
+            });
+
+            // Nạp vào dropdown ở Tab Dịch Truyện
+            translationGlossarySelect.innerHTML = '<option value="" selected>-- Không sử dụng (Hoặc dùng Local) --</option>';
+            collections.forEach(col => {
+                const opt = document.createElement('option');
+                opt.value = col.id;
+                opt.textContent = col.name;
+                translationGlossarySelect.appendChild(opt);
+            });
+
+            if (currentCollectionId) {
+                glossaryCollectionSelect.value = currentCollectionId;
+                translationGlossarySelect.value = currentCollectionId;
+            }
+        } catch (e) {
+            console.error('Lỗi tải danh sách bộ thuật ngữ SQLite:', e);
+        }
+    }
+
+    async function loadCollectionTerms(collectionId) {
+        if (!collectionId) return;
+        try {
+            const response = await fetch(`/api/glossaries/${collectionId}/terms`);
+            if (!response.ok) throw new Error('Không thể tải danh sách thuật ngữ.');
+            const data = await response.json();
+            
+            activeGlossary = data.terms || {};
+            renderGlossaryTable(activeGlossary);
+            updateGlossaryCountDisplay();
+        } catch (e) {
+            console.error(e);
+            alert(`Lỗi khi load từ khóa: ${e.message}`);
+        }
+    }
+
     // --- 1. API KEY CONFIGURATION & PROVIDER OPTIONS ---
     const modelsByProvider = {
         gemini: [
@@ -112,7 +183,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- 2. GLOSSARY CONFIGURATION ---
-    // Load saved Glossary from LocalStorage
+    // Tải danh sách bộ từ vựng SQLite ban đầu
+    loadGlossaryCollections();
+
+    // Load saved Glossary từ LocalStorage làm fallback
     const savedGlossaryRaw = localStorage.getItem('novel_glossary');
     if (savedGlossaryRaw) {
         try {
@@ -126,6 +200,101 @@ document.addEventListener('DOMContentLoaded', () => {
         // Build initial state from current mockup rows in HTML
         syncGlossaryFromTable();
     }
+
+    // Sự kiện tương tác SQLite Glossary Collections
+    glossaryCollectionSelect.addEventListener('change', () => {
+        currentCollectionId = parseInt(glossaryCollectionSelect.value);
+        if (currentCollectionId) {
+            loadCollectionTerms(currentCollectionId);
+        }
+    });
+
+    translationGlossarySelect.addEventListener('change', async () => {
+        const id = translationGlossarySelect.value;
+        if (id) {
+            try {
+                const response = await fetch(`/api/glossaries/${id}/terms`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const count = Object.keys(data.terms || {}).length;
+                    activeGlossaryCountText.textContent = `${count} thuật ngữ (SQLite)`;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        } else {
+            updateGlossaryCountDisplay();
+        }
+    });
+
+    btnCreateCollection.addEventListener('click', async () => {
+        const name = newCollectionNameInput.value.trim();
+        if (!name) {
+            alert('Vui lòng nhập tên bộ từ vựng mới!');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/glossaries', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ name: name, description: '' })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || 'Không thể tạo bộ từ vựng.');
+            }
+
+            alert('Đã tạo thành công bộ từ vựng mới!');
+            newCollectionNameInput.value = '';
+            
+            currentCollectionId = data.collection.id;
+            await loadGlossaryCollections();
+            
+            activeGlossary = {};
+            renderGlossaryTable(activeGlossary);
+            updateGlossaryCountDisplay();
+        } catch (e) {
+            console.error(e);
+            alert(`Lỗi: ${e.message}`);
+        }
+    });
+
+    btnDeleteCollection.addEventListener('click', async () => {
+        const id = glossaryCollectionSelect.value;
+        if (!id) {
+            alert('Vui lòng chọn bộ thuật ngữ cần xóa!');
+            return;
+        }
+
+        const confirmDelete = confirm('Bạn có chắc chắn muốn xóa bộ từ vựng này không? Tất cả các thuật ngữ thuộc bộ này cũng sẽ bị xóa vĩnh viễn.');
+        if (!confirmDelete) return;
+
+        try {
+            const response = await fetch(`/api/glossaries/${id}`, {
+                method: 'DELETE'
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                throw new Error(data.detail || 'Không thể xóa bộ từ vựng.');
+            }
+
+            alert('Đã xóa bộ từ vựng thành công!');
+            currentCollectionId = null;
+            await loadGlossaryCollections();
+            
+            activeGlossary = {};
+            renderGlossaryTable(activeGlossary);
+            updateGlossaryCountDisplay();
+        } catch (e) {
+            console.error(e);
+            alert(`Lỗi: ${e.message}`);
+        }
+    });
 
     function updateGlossaryCountDisplay() {
         const count = Object.keys(activeGlossary).length;
@@ -220,10 +389,39 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Save Glossary Button
-    btnSaveGlossary.addEventListener('click', () => {
+    btnSaveGlossary.addEventListener('click', async () => {
         syncGlossaryFromTable();
         localStorage.setItem('novel_glossary', JSON.stringify(activeGlossary));
-        alert('Đã lưu thành công bộ thuật ngữ vào máy của bạn!');
+
+        if (currentCollectionId) {
+            const termsList = [];
+            for (const [src, tgt] of Object.entries(activeGlossary)) {
+                termsList.push({ source_term: src, target_term: tgt });
+            }
+
+            try {
+                const response = await fetch(`/api/glossaries/${currentCollectionId}/terms`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ terms: termsList })
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Lỗi lưu thuật ngữ vào database.');
+                }
+
+                alert('Đã lưu thành công bộ thuật ngữ vào SQLite Database và LocalStorage!');
+                await loadGlossaryCollections();
+            } catch (e) {
+                console.error(e);
+                alert(`Lỗi DB: ${e.message}`);
+            }
+        } else {
+            alert('Đã lưu thành công bộ thuật ngữ vào LocalStorage của trình duyệt! (Mẹo: Hãy tạo hoặc chọn một bộ thuật ngữ SQLite ở cột bên trái để lưu trữ vĩnh viễn vào Database).');
+        }
     });
 
     // Auto Scan/Build Glossary Tab 1
@@ -365,14 +563,26 @@ document.addEventListener('DOMContentLoaded', () => {
                             // Just status update
                         } else if (eventData.event === 'chunk_completed') {
                             const translatedPart = eventData.translated_chunk;
-                            if (fullTranslationText === "") {
-                                translationPreviewArea.textContent = ""; // Clear initial logs
-                            }
-                            fullTranslationText += (fullTranslationText ? "\n\n" : "") + translatedPart;
-                            translationPreviewArea.textContent = fullTranslationText;
-                            // Scroll preview to bottom
-                            const container = translationPreviewArea.parentElement;
+                            const sourcePart = eventData.source_chunk || "";
+                            
+                            // Tạo hàng tr và append vào bảng
+                            const tr = document.createElement('tr');
+                            tr.innerHTML = `
+                                <td style="vertical-align: top; padding: 10px;">
+                                    <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
+                                </td>
+                                <td style="vertical-align: top; padding: 10px;">
+                                    <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
+                                </td>
+                            `;
+                            splitScreenBody.appendChild(tr);
+
+                            // Tự động cuộn xuống dưới cùng của container chứa bảng
+                            const container = splitScreenTable.parentElement;
                             container.scrollTop = container.scrollHeight;
+                            
+                            // Để dự phòng, vẫn cộng dồn vào fullTranslationText
+                            fullTranslationText += (fullTranslationText ? "\n\n" : "") + translatedPart;
                         } else if (eventData.event === 'paused') {
                             // UI Pause state
                             translationStatusText.textContent = "Đã tạm dừng dịch thuật.";
@@ -381,8 +591,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             btnPauseTranslation.disabled = false;
                             return; // Stop processing this stream
                         } else if (eventData.event === 'completed') {
-                            fullTranslationText = eventData.full_translation;
-                            translationPreviewArea.textContent = fullTranslationText;
+                            if (eventData.full_translation && splitScreenBody.children.length === 0) {
+                                fullTranslationText = eventData.full_translation;
+                            }
                             
                             // Show download action button
                             downloadActionsPanel.classList.remove('d-none');
@@ -438,25 +649,38 @@ document.addEventListener('DOMContentLoaded', () => {
         translationProgressBar.setAttribute('aria-valuenow', '0');
         translationPercentage.textContent = '0%';
         translationStatusText.textContent = "Đang chuẩn bị kết nối API...";
-        translationPreviewArea.textContent = "Bắt đầu tiến trình dịch thuật...\n";
+        
+        // Cấu hình hiển thị bảng Split-screen
+        translationPreviewArea.classList.add('d-none');
+        splitScreenTable.classList.remove('d-none');
+        splitScreenBody.innerHTML = "";
+        
         fullTranslationText = "";
 
         try {
+            const glossaryIdVal = translationGlossarySelect.value;
+            const requestBody = {
+                text: extractedNovelText,
+                api_key: apiKey,
+                model: model,
+                source_lang: sourceLang,
+                target_lang: targetLang,
+                provider: provider
+            };
+
+            if (glossaryIdVal) {
+                requestBody.glossary_id = parseInt(glossaryIdVal);
+            } else {
+                requestBody.glossary = activeGlossary;
+            }
+
             // POST to /api/translate
             const response = await fetch('/api/translate', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    text: extractedNovelText,
-                    glossary: activeGlossary,
-                    api_key: apiKey,
-                    model: model,
-                    source_lang: sourceLang,
-                    target_lang: targetLang,
-                    provider: provider
-                })
+                body: JSON.stringify(requestBody)
             });
 
             if (!response.ok) {
@@ -526,22 +750,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    // --- 4. DOWNLOAD SERVICES ---
-    // Trigger file download helper
-    async function triggerDownload(format) {
-        if (!fullTranslationText || fullTranslationText.trim().length === 0) {
-            alert('Không có nội dung bản dịch nào để tải xuống!');
+    // --- 4. EXPORT & DOWNLOAD SERVICES ---
+    // Trigger file export helper
+    async function triggerExport(format) {
+        // Gom tất cả nội dung đã sửa đổi từ các textarea đối chiếu
+        const textAreas = document.querySelectorAll('.translated-chunk-input');
+        let editedTranslationText = "";
+
+        if (textAreas.length > 0) {
+            const texts = [];
+            textAreas.forEach(ta => {
+                texts.push(ta.value);
+            });
+            editedTranslationText = texts.join("\n\n");
+        } else {
+            editedTranslationText = fullTranslationText;
+        }
+
+        if (!editedTranslationText || editedTranslationText.trim().length === 0) {
+            alert('Không có nội dung bản dịch nào để xuất file!');
             return;
         }
 
         try {
-            const response = await fetch('/api/download', {
+            const response = await fetch('/api/export', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    text: fullTranslationText,
+                    text: editedTranslationText,
                     format: format,
                     filename: `${novelFilename}_dich`
                 })
@@ -570,11 +808,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnDownloadTxt.addEventListener('click', (e) => {
         e.preventDefault();
-        triggerDownload('txt');
+        triggerExport('txt');
     });
 
     btnDownloadDocx.addEventListener('click', (e) => {
         e.preventDefault();
-        triggerDownload('docx');
+        triggerExport('docx');
     });
 });
