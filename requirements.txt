@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+google-generativeai
+python-docx
+pdfplumber
+EbookLib
+beautifulsoup4
+python-multipart
+python-dotenv

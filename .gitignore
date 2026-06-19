@@ -1,0 +1,25 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Unit test / coverage reports
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments & Secrets
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Project state files
+translation_state.json
+
+# Editors / OS temp files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

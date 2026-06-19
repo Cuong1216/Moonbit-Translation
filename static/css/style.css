@@ -1,0 +1,177 @@
+/* Modern Dark Theme overrides for Bootstrap 5 */
+
+:root {
+    --bg-main: #090c15;
+    --bg-card: #121826;
+    --border-color: #242c42;
+    --text-muted: #8292ab;
+    
+    --purple: #8b5cf6;
+    --purple-hover: #7c3aed;
+    --purple-glow: rgba(139, 92, 246, 0.45);
+    --purple-light: rgba(139, 92, 246, 0.12);
+    
+    --transition-fast: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    --font-sans: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+}
+
+body {
+    font-family: var(--font-sans);
+    background-color: var(--bg-main) !important;
+    background-image: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                      radial-gradient(circle at 90% 80%, rgba(139, 92, 246, 0.05) 0%, transparent 40%);
+    background-attachment: fixed;
+    color: #f1f5f9 !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Purple Accent Gradient */
+.bg-purple-grad {
+    background: linear-gradient(135deg, var(--purple), #6366f1);
+}
+
+.text-purple-glow {
+    color: #ffffff;
+    text-shadow: 0 0 10px var(--purple-glow);
+}
+
+/* Glassmorphism Cards */
+.card.bg-secondary-dark {
+    background-color: var(--bg-card) !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    transition: var(--transition-fast);
+}
+
+.card.bg-secondary-dark:hover {
+    border-color: rgba(139, 92, 246, 0.3) !important;
+}
+
+/* Nav Links Styling (Pills) */
+.nav-link-custom {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    padding: 10px 20px;
+    border-radius: 30px;
+    font-weight: 500;
+    font-size: 0.95rem;
+    transition: var(--transition-fast);
+    cursor: pointer;
+    outline: none;
+}
+
+.nav-link-custom:hover {
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.02);
+}
+
+.nav-link-custom.active {
+    color: #ffffff;
+    background: linear-gradient(135deg, var(--purple), #6366f1);
+    border-color: transparent;
+    box-shadow: 0 0 15px var(--purple-glow);
+}
+
+/* Button Purple Styles */
+.btn-purple {
+    background: linear-gradient(135deg, var(--purple), #6366f1);
+    color: #ffffff;
+    border: none;
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+    transition: var(--transition-fast);
+    border-radius: 8px;
+}
+
+.btn-purple:hover {
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px var(--purple-glow);
+}
+
+.btn-purple:active {
+    transform: translateY(0);
+}
+
+/* Input Fields Overrides */
+.form-control, .form-select {
+    border: 1px solid var(--border-color) !important;
+    border-radius: 8px !important;
+    padding: 10px 14px;
+    transition: var(--transition-fast);
+}
+
+.form-control:focus, .form-select:focus {
+    background-color: #0c101a !important;
+    border-color: var(--purple) !important;
+    box-shadow: 0 0 0 3px var(--purple-light) !important;
+}
+
+.input-group-text {
+    border-radius: 8px 0 0 8px !important;
+}
+
+/* Tables styling */
+.table {
+    border-color: var(--border-color) !important;
+}
+
+.table-secondary-dark {
+    background-color: #1a2233 !important;
+}
+
+.table tr:hover {
+    background-color: rgba(255, 255, 255, 0.015) !important;
+}
+
+/* Content Editable cells decoration */
+.glossary-cell {
+    padding: 12px 8px !important;
+    outline: none;
+    transition: var(--transition-fast);
+}
+
+.glossary-cell:focus {
+    background-color: #161e31;
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px var(--purple);
+}
+
+.glossary-cell[placeholder]:empty::before {
+    content: attr(placeholder);
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Live Output Preview styling */
+.output-preview-container {
+    border: 1px solid var(--border-color) !important;
+    border-radius: 12px !important;
+}
+
+/* Scrollbar Customization */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-main);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--purple);
+}
+
+/* Additional alert styles */
+.alert-info.bg-purple-light {
+    background-color: var(--purple-light) !important;
+    color: #c084fc !important;
+}

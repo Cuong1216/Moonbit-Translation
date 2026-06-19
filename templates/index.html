@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Novel Translator & Glossary Builder</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="bg-dark text-light">
+    <!-- Main App Wrapper -->
+    <div class="container py-4">
+        <!-- Top App Header -->
+        <header class="d-flex flex-wrap align-items-center justify-content-between pb-3 mb-4 border-bottom border-secondary">
+            <div class="d-flex align-items-center gap-3">
+                <div class="logo-box bg-purple-grad p-2 rounded-3 text-white d-flex align-items-center justify-content-center">
+                    <i class="fa-solid fa-wand-magic-sparkles fa-lg"></i>
+                </div>
+                <div>
+                    <h1 class="h3 fw-bold mb-0 text-purple-glow">GeminiTrans</h1>
+                    <small class="text-secondary">Hệ thống dịch tiểu thuyết và trích xuất thuật ngữ bằng AI</small>
+                </div>
+            </div>
+            
+            <!-- Global API Key Config -->
+            <div class="col-12 col-md-auto mt-3 mt-md-0">
+                <div class="input-group">
+                    <span class="input-group-text bg-secondary border-secondary text-light"><i class="fa-solid fa-key"></i></span>
+                    <input type="password" id="global-api-key" class="form-control bg-dark text-light border-secondary" placeholder="Nhập Gemini API Key tại đây..." style="width: 250px;">
+                    <button class="btn btn-outline-secondary border-secondary text-light" type="button" id="toggle-api-key" title="Ẩn/Hiện API Key">
+                        <i class="fa-regular fa-eye"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Workspace Tabs -->
+        <div class="row">
+            <div class="col-12">
+                <!-- Nav Tabs -->
+                <ul class="nav nav-pills mb-4 justify-content-center justify-content-md-start gap-2" id="mainTab" role="tablist">
+                    <li class="nav-item-pill" role="presentation">
+                        <button class="nav-link-custom active" id="glossary-tab-btn" data-bs-toggle="pill" data-bs-target="#glossary-pane" type="button" role="tab" aria-controls="glossary-pane" aria-selected="true">
+                            <i class="fa-solid fa-book-bookmark me-2"></i>1. Quản lý Thuật ngữ (Glossary Builder)
+                        </button>
+                    </li>
+                    <li class="nav-item-pill" role="presentation">
+                        <button class="nav-link-custom" id="translation-tab-btn" data-bs-toggle="pill" data-bs-target="#translation-pane" type="button" role="tab" aria-controls="translation-pane" aria-selected="false">
+                            <i class="fa-solid fa-language me-2"></i>2. Dịch Tiểu Thuyết Mới
+                        </button>
+                    </li>
+                </ul>
+
+                <!-- Tab Panes -->
+                <div class="tab-content" id="mainTabContent">
+                    <!-- Tab 1: Glossary Builder -->
+                    <div class="tab-pane fade show active" id="glossary-pane" role="tabpanel" aria-labelledby="glossary-tab-btn">
+                        <div class="row g-4">
+                            <!-- Left controls: File upload and settings -->
+                            <div class="col-12 col-lg-4">
+                                <div class="card bg-secondary-dark border-secondary p-4 h-100">
+                                    <h3 class="h5 fw-bold mb-3 d-flex align-items-center gap-2">
+                                        <i class="fa-solid fa-robot text-purple"></i> Tự động quét thuật ngữ
+                                    </h3>
+                                    <p class="text-secondary small mb-4">Tải lên chương truyện gốc (tiếng Anh, tiếng Trung...) và chương truyện tương ứng đã dịch cũ để AI tự động trích xuất bảng từ vựng đối chiếu.</p>
+                                    
+                                    <!-- Source File Upload -->
+                                    <div class="mb-3">
+                                        <label for="glossary-source-file" class="form-label fw-semibold text-secondary">Tệp tin raw cũ (Gốc):</label>
+                                        <input type="file" id="glossary-source-file" class="form-control bg-dark text-light border-secondary" accept=".docx,.pdf,.epub,.txt">
+                                        <div class="form-text text-muted">Hỗ trợ .docx, .pdf, .epub, .txt</div>
+                                    </div>
+                                    
+                                    <!-- Translated File Upload -->
+                                    <div class="mb-4">
+                                        <label for="glossary-translated-file" class="form-label fw-semibold text-secondary">Tệp tin đã dịch cũ (Đích):</label>
+                                        <input type="file" id="glossary-translated-file" class="form-control bg-dark text-light border-secondary" accept=".docx,.pdf,.epub,.txt">
+                                        <div class="form-text text-muted">Hỗ trợ .docx, .pdf, .epub, .txt</div>
+                                    </div>
+
+                                    <button class="btn btn-purple w-100 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2" id="btn-build-glossary">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i> Tự động quét thuật ngữ
+                                    </button>
+                                    
+                                    <div class="alert alert-info bg-purple-light border-purple text-purple-light mt-4 mb-0 small" role="alert">
+                                        <i class="fa-solid fa-circle-info me-1"></i> Quá trình quét có thể mất từ 15-45 giây tùy thuộc vào độ dài tệp tin của bạn.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right controls: Glossary Table -->
+                            <div class="col-12 col-lg-8">
+                                <div class="card bg-secondary-dark border-secondary p-4 h-100">
+                                    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+                                        <h3 class="h5 fw-bold mb-0"><i class="fa-solid fa-list-check me-2"></i>Danh sách thuật ngữ hiện tại</h3>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-outline-success btn-sm" id="btn-add-term">
+                                                <i class="fa-solid fa-plus me-1"></i> Thêm từ mới
+                                            </button>
+                                            <button class="btn btn-purple btn-sm fw-semibold" id="btn-save-glossary">
+                                                <i class="fa-solid fa-floppy-disk me-1"></i> Lưu bộ thuật ngữ
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div class="table-responsive border border-secondary rounded-3" style="max-height: 480px;">
+                                        <table class="table table-dark table-hover mb-0 align-middle">
+                                            <thead class="table-secondary-dark sticky-top">
+                                                <tr>
+                                                    <th scope="col" style="width: 45%;">Từ gốc (Source)</th>
+                                                    <th scope="col" style="width: 45%;">Từ dịch (Target)</th>
+                                                    <th scope="col" class="text-center" style="width: 10%;">Xóa</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="glossary-table-body">
+                                                <!-- Mock or loaded glossary items -->
+                                                <tr>
+                                                    <td contenteditable="true" class="fw-semibold text-light glossary-cell source-cell">Xiao Yan</td>
+                                                    <td contenteditable="true" class="text-info glossary-cell target-cell">Tiêu Viêm</td>
+                                                    <td class="text-center">
+                                                        <button class="btn btn-outline-danger btn-sm border-0 delete-row-btn" title="Xóa"><i class="fa-regular fa-trash-can"></i></button>
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td contenteditable="true" class="fw-semibold text-light glossary-cell source-cell">Qi Refining</td>
+                                                    <td contenteditable="true" class="text-info glossary-cell target-cell">Luyện Khí</td>
+                                                    <td class="text-center">
+                                                        <button class="btn btn-outline-danger btn-sm border-0 delete-row-btn" title="Xóa"><i class="fa-regular fa-trash-can"></i></button>
+                                                    </td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div class="form-text text-secondary mt-2">
+                                        <i class="fa-solid fa-keyboard me-1"></i> Nhấp đúp trực tiếp vào ô để sửa đổi thuật ngữ nhanh chóng.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Novel Translator -->
+                    <div class="tab-pane fade" id="translation-pane" role="tabpanel" aria-labelledby="translation-tab-btn">
+                        <div class="row g-4">
+                            <!-- Left controls: Upload novel and select model -->
+                            <div class="col-12 col-lg-4">
+                                <div class="card bg-secondary-dark border-secondary p-4 h-100">
+                                    <h3 class="h5 fw-bold mb-3"><i class="fa-solid fa-file-signature text-purple"></i> Tệp truyện cần dịch</h3>
+                                    
+                                    <!-- Novel File Upload -->
+                                    <div class="mb-3">
+                                        <label for="novel-file" class="form-label fw-semibold text-secondary">Chọn tệp tin tiểu thuyết mới:</label>
+                                        <input type="file" id="novel-file" class="form-control bg-dark text-light border-secondary" accept=".docx,.pdf,.epub,.txt">
+                                        <div class="form-text text-muted">Hỗ trợ .docx, .pdf, .epub, .txt</div>
+                                    </div>
+                                    
+                                    <!-- Language select configuration -->
+                                    <div class="mb-3">
+                                        <label for="source-lang" class="form-label fw-semibold text-secondary">Ngôn ngữ gốc:</label>
+                                        <select id="source-lang" class="form-select bg-dark text-light border-secondary">
+                                            <option value="Trung Quốc" selected>Trung Quốc</option>
+                                            <option value="Tiếng Anh">Tiếng Anh</option>
+                                            <option value="Tiếng Nhật">Tiếng Nhật</option>
+                                            <option value="Auto">Auto</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="target-lang" class="form-label fw-semibold text-secondary">Ngôn ngữ đích:</label>
+                                        <select id="target-lang" class="form-select bg-dark text-light border-secondary">
+                                            <option value="Tiếng Việt" selected>Tiếng Việt</option>
+                                            <option value="Tiếng Anh">Tiếng Anh</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- AI Provider select configuration -->
+                                    <div class="mb-3">
+                                        <label for="ai-provider" class="form-label fw-semibold text-secondary">Chọn Nhà cung cấp AI:</label>
+                                        <select id="ai-provider" class="form-select bg-dark text-light border-secondary">
+                                            <option value="gemini" selected>Google Gemini</option>
+                                            <option value="claude">Anthropic Claude</option>
+                                            <option value="openrouter">OpenRouter</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Model select configuration -->
+                                    <div class="mb-4">
+                                        <label for="translation-model" class="form-label fw-semibold text-secondary">Chọn Model AI:</label>
+                                        <select id="translation-model" class="form-select bg-dark text-light border-secondary">
+                                            <option value="gemini-1.5-flash" selected>Gemini 1.5 Flash (Nhanh & Tối ưu)</option>
+                                            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Thông minh vượt trội)</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Glossary status tracker -->
+                                    <div class="mb-4 bg-dark p-3 border border-secondary rounded-3">
+                                        <span class="text-secondary small d-block mb-1">Thuật ngữ đang áp dụng:</span>
+                                        <strong id="active-glossary-count" class="text-purple-glow">2 từ khóa</strong>
+                                    </div>
+
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-purple w-100 py-2 fw-semibold d-flex align-items-center justify-content-center gap-2" id="btn-start-translation">
+                                            <i class="fa-solid fa-paper-plane"></i> Bắt đầu dịch thuật
+                                        </button>
+                                        <button class="btn btn-warning py-2 fw-semibold d-none align-items-center justify-content-center gap-2" id="btn-pause-translation" style="width: 150px;">
+                                            <i class="fa-solid fa-pause"></i> Tạm dừng
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Right Controls: Progress and Preview Workspace -->
+                            <div class="col-12 col-lg-8">
+                                <div class="card bg-secondary-dark border-secondary p-4 h-100">
+                                    <h3 class="h5 fw-bold mb-3"><i class="fa-solid fa-tv me-2"></i>Trạng thái dịch thuật</h3>
+
+                                    <!-- Progress Bar and Status Logger -->
+                                    <div class="mb-4 p-3 bg-dark border border-secondary rounded-3">
+                                        <div class="d-flex justify-content-between mb-2">
+                                            <span class="small text-secondary" id="translation-status-text">Đang chờ lệnh dịch...</span>
+                                            <span class="small fw-bold text-purple-glow" id="translation-percentage">0%</span>
+                                        </div>
+                                        <div class="progress bg-secondary-dark" style="height: 12px;">
+                                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-purple" id="translation-progress-bar" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Download and Output Actions Panel -->
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h4 class="h6 fw-bold text-secondary mb-0">Xem trước bản dịch thời gian thực</h4>
+                                        <div class="d-none" id="download-actions">
+                                            <div class="btn-group">
+                                                <button class="btn btn-success btn-sm dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    <i class="fa-solid fa-download me-1"></i> Tải file kết quả
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end border-secondary">
+                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-txt"><i class="fa-regular fa-file-lines me-2 text-warning"></i>Tải tệp văn bản (.txt)</a></li>
+                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-docx"><i class="fa-regular fa-file-word me-2 text-info"></i>Tải tệp Word (.docx)</a></li>
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Realtime output display -->
+                                    <div class="output-preview-container bg-dark border border-secondary p-3 rounded-3 overflow-y-auto" style="height: 300px;">
+                                        <div id="translation-preview-area" class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.95rem;">
+                                            Bản dịch chi tiết sẽ được cập nhật tuần tự tại đây dưới dạng stream khi hệ thống bắt đầu làm việc...
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 Bundle JS with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Core Application Logic -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
