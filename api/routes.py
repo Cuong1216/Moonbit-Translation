@@ -47,7 +47,9 @@ def save_session_state(session_id: str):
             "source_lang": session["source_lang"],
             "target_lang": session["target_lang"],
             "provider": session["provider"],
-            "use_agentic": session.get("use_agentic", False)
+            "use_agentic": session.get("use_agentic", False),
+            "direction": session.get("direction", "horizontal"),
+            "toc": session.get("toc", [])
         }
         with open(get_state_file(session_id), "w", encoding="utf-8") as f:
             json.dump(state_data, f, ensure_ascii=False, indent=2)
@@ -84,6 +86,8 @@ def load_all_session_states():
                             "target_lang": data["target_lang"],
                             "provider": data["provider"],
                             "use_agentic": data.get("use_agentic", False),
+                            "direction": data.get("direction", "horizontal"),
+                            "toc": data.get("toc", []),
                             "queue": asyncio.Queue()
                         }
                     logger.info(f"Đã khôi phục session {session_id} từ file trạng thái.")
@@ -107,6 +111,8 @@ class TranslateRequest(BaseModel):
     target_lang: str = "Tiếng Việt"
     provider: str = "gemini"
     use_agentic: bool = False
+    direction: Optional[str] = "horizontal"
+    toc: Optional[List[dict]] = None
 
 class DownloadRequest(BaseModel):
     text: str
@@ -171,12 +177,17 @@ async def upload_file(file: UploadFile = File(...)):
             )
 
     try:
+        import uuid
+        session_id = str(uuid.uuid4())
         # Gọi extractor để lấy plain text
-        extracted_text = await file_extractor.extract_text(tmp_path, suffix)
+        extracted_data = await file_extractor.extract_text(tmp_path, suffix, session_id=session_id)
         return {
             "filename": filename,
             "status": "success",
-            "content": extracted_text
+            "content": extracted_data["text"],
+            "direction": extracted_data["direction"],
+            "toc": extracted_data["toc"],
+            "session_id": session_id
         }
     except Exception as e:
         logger.error(f"Lỗi trích xuất file {filename}: {e}")
@@ -221,8 +232,10 @@ async def build_glossary_endpoint(
 
     try:
         # Trích xuất text từ cả hai tệp
-        source_text = await file_extractor.extract_text(src_path, src_suffix)
-        translated_text = await file_extractor.extract_text(tgt_path, tgt_suffix)
+        source_data = await file_extractor.extract_text(src_path, src_suffix)
+        translated_data = await file_extractor.extract_text(tgt_path, tgt_suffix)
+        source_text = source_data["text"]
+        translated_text = translated_data["text"]
 
         if not source_text.strip() or not translated_text.strip():
             raise HTTPException(
@@ -369,9 +382,21 @@ async def event_generator(session_id: str):
             'total_chunks': session["total_chunks"],
             'chunks': session["chunks"][:session["current_chunk_idx"]],
             'translated_chunks': session["translated_chunks"],
-            'glossary': session["glossary"]
+            'glossary': session["glossary"],
+            'direction': session.get("direction", "horizontal"),
+            'toc': session.get("toc", [])
         }
         yield f"data: {json.dumps(restore_data, ensure_ascii=False)}\n\n"
+    else:
+        # Gửi sự kiện bắt đầu (start_state) chứa thông tin ban đầu như direction và toc
+        start_data = {
+            'status': 'Bắt đầu phiên dịch thuật...',
+            'progress': 0,
+            'event': 'start_state',
+            'direction': session.get("direction", "horizontal"),
+            'toc': session.get("toc", [])
+        }
+        yield f"data: {json.dumps(start_data, ensure_ascii=False)}\n\n"
     
     while True:
         try:
@@ -437,6 +462,8 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
         "target_lang": request.target_lang,
         "provider": provider,
         "use_agentic": request.use_agentic,
+        "direction": request.direction or "horizontal",
+        "toc": request.toc or [],
         "queue": asyncio.Queue()
     }
     save_session_state(session_id)
@@ -496,6 +523,41 @@ async def translate_chunk_endpoint(request: TranslateChunkRequest, db: Session =
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi hệ thống khi dịch lại đoạn văn: {str(e)}"
         )
+
+@router.get("/state/{session_id}")
+async def get_state_endpoint(session_id: str):
+    """
+    API lấy trạng thái chi tiết của một phiên dịch thuật.
+    """
+    session = active_sessions.get(session_id)
+    if not session:
+        state_file = get_state_file(session_id)
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return {
+                        "status": "success",
+                        "session_id": session_id,
+                        "current_chunk_idx": data.get("current_chunk_idx", 0),
+                        "total_chunks": data.get("total_chunks", 0),
+                        "is_paused": data.get("is_paused", False),
+                        "direction": data.get("direction", "horizontal"),
+                        "toc": data.get("toc", [])
+                    }
+            except Exception:
+                pass
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên dịch thuật này.")
+    
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "current_chunk_idx": session.get("current_chunk_idx", 0),
+        "total_chunks": session.get("total_chunks", 0),
+        "is_paused": session.get("is_paused", False),
+        "direction": session.get("direction", "horizontal"),
+        "toc": session.get("toc", [])
+    }
 
 @router.get("/stream")
 async def stream_endpoint(session_id: str):

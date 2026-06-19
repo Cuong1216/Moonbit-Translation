@@ -6,10 +6,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let extractedNovelText = "";
     let novelFilename = "ban_dich";
     let fullTranslationText = "";
+    let novelDirection = "horizontal";
+    let novelToc = [];
+    let currentDirection = "horizontal";
+    let isForcedHorizontal = false;
 
     // DOM Elements
     const globalApiKeyInput = document.getElementById('global-api-key');
     const toggleApiKeyBtn = document.getElementById('toggle-api-key');
+    const btnToggleReadingMode = document.getElementById('btn-toggle-reading-mode');
 
     // Tab 1 Elements (Glossary Builder)
     const glossarySourceFileInput = document.getElementById('glossary-source-file');
@@ -60,6 +65,36 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;");
+    }
+
+    function getSourceChunkAttrs() {
+        if (currentDirection === "vertical") {
+            if (isForcedHorizontal) {
+                return {
+                    className: "text-secondary font-monospace horizontal-forced",
+                    style: ""
+                };
+            } else {
+                return {
+                    className: "text-secondary font-monospace vertical-text",
+                    style: ""
+                };
+            }
+        } else {
+            return {
+                className: "text-secondary font-monospace",
+                style: "white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;"
+            };
+        }
+    }
+
+    function updateReadingModeButtonVisibility() {
+        const direction = currentDirection || novelDirection;
+        if (direction === "vertical") {
+            btnToggleReadingMode.classList.remove("d-none");
+        } else {
+            btnToggleReadingMode.classList.add("d-none");
+        }
     }
 
     function escapeRegExp(string) {
@@ -614,14 +649,16 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             extractedNovelText = data.content;
+            novelDirection = data.direction || "horizontal";
+            novelToc = data.toc || [];
             
             // Show preview of extracted text (first 1000 characters)
             const previewText = extractedNovelText.length > 1500 
                 ? extractedNovelText.substring(0, 1500) + "\n\n...[Còn tiếp]..."
                 : extractedNovelText;
 
-            translationPreviewArea.textContent = `[Đã trích xuất thành công văn bản]\n[Tổng ký tự: ${extractedNovelText.length.toLocaleString('vi-VN')} ký tự]\n\n--- Xem trước bản gốc ---\n${previewText}`;
-            translationStatusText.textContent = "Đã nạp file thành công, sẵn sàng dịch.";
+            translationPreviewArea.textContent = `[Đã trích xuất thành công văn bản]\n[Hướng chữ: ${novelDirection === 'vertical' ? 'Dọc (Dọc dòng)' : 'Ngang (Ngang dòng)'}]\n[Mục lục: ${novelToc.length} mục]\n[Tổng ký tự: ${extractedNovelText.length.toLocaleString('vi-VN')} ký tự]\n\n--- Xem trước bản gốc ---\n${previewText}`;
+            translationStatusText.textContent = `Đã nạp file thành công (Hướng chữ: ${novelDirection === 'vertical' ? 'Dọc' : 'Ngang'}), sẵn sàng dịch.`;
             btnStartTranslation.disabled = false;
         } catch (e) {
             console.error(e);
@@ -641,6 +678,11 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const eventData = JSON.parse(event.data);
 
+                if (eventData.direction) {
+                    currentDirection = eventData.direction;
+                    updateReadingModeButtonVisibility();
+                }
+
                 // Update Progress Bar
                 const progress = eventData.progress || 0;
                 translationProgressBar.style.width = `${progress}%`;
@@ -649,7 +691,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 translationStatusText.textContent = eventData.status;
 
                 // Handle Events
-                if (eventData.event === 'translating') {
+                if (eventData.event === 'start_state') {
+                    if (eventData.direction) {
+                        currentDirection = eventData.direction;
+                    }
+                    updateReadingModeButtonVisibility();
+                } else if (eventData.event === 'translating') {
                     // Cập nhật trạng thái
                 } else if (eventData.event === 'restore_state') {
                     // Khôi phục giao diện Split-screen
@@ -661,6 +708,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (eventData.glossary) {
                         translationGlossaryTerms = eventData.glossary;
                     }
+                    if (eventData.direction) {
+                        currentDirection = eventData.direction;
+                    }
+                    updateReadingModeButtonVisibility();
+                    
                     const glossary = getCurrentTranslationGlossary();
 
                     const chunks = eventData.chunks || [];
@@ -670,10 +722,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const sourcePart = chunks[i];
                         const translatedPart = translatedChunks[i] || "";
 
+                        const attrs = getSourceChunkAttrs();
+
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
                             <td style="vertical-align: top; padding: 10px;">
-                                <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${highlightGlossaryTerms(sourcePart, glossary)}</div>
+                                <div class="${attrs.className}" style="${attrs.style}">${highlightGlossaryTerms(sourcePart, glossary)}</div>
                             </td>
                             <td style="vertical-align: top; padding: 10px;">
                                 <div class="d-flex align-items-start gap-2">
@@ -702,10 +756,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     const sourcePart = eventData.source_chunk || "";
                     const glossary = getCurrentTranslationGlossary();
 
+                    const attrs = getSourceChunkAttrs();
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td style="vertical-align: top; padding: 10px;">
-                            <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${highlightGlossaryTerms(sourcePart, glossary)}</div>
+                            <div class="${attrs.className}" style="${attrs.style}">${highlightGlossaryTerms(sourcePart, glossary)}</div>
                         </td>
                         <td style="vertical-align: top; padding: 10px;">
                             <div class="d-flex align-items-start gap-2">
@@ -796,6 +852,10 @@ document.addEventListener('DOMContentLoaded', () => {
         splitScreenTable.classList.remove('d-none');
         splitScreenBody.innerHTML = "";
         
+        currentDirection = novelDirection;
+        isForcedHorizontal = false;
+        updateReadingModeButtonVisibility();
+        
         fullTranslationText = "";
 
         try {
@@ -805,6 +865,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const requestBody = {
                 text: extractedNovelText,
+                direction: novelDirection,
+                toc: novelToc,
                 api_key: apiKey,
                 model: model,
                 source_lang: sourceLang,
@@ -1107,6 +1169,17 @@ document.addEventListener('DOMContentLoaded', () => {
             target.innerHTML = highlightTargetGlossaryTerms(text, glossary);
         }
     }, true);
+
+    // Toggle reading mode layout (Vertical vs Forced Horizontal) for original text
+    btnToggleReadingMode.addEventListener('click', () => {
+        isForcedHorizontal = !isForcedHorizontal;
+        const sourceDivs = splitScreenBody.querySelectorAll('.text-secondary.font-monospace');
+        sourceDivs.forEach(div => {
+            const attrs = getSourceChunkAttrs();
+            div.className = attrs.className;
+            div.style.cssText = attrs.style;
+        });
+    });
 
     // Phục hồi kết nối khi F5 tab nếu session đang chạy
     const savedSessionId = sessionStorage.getItem('current_session_id');
