@@ -46,7 +46,8 @@ def save_session_state(session_id: str):
             "model": session["model"],
             "source_lang": session["source_lang"],
             "target_lang": session["target_lang"],
-            "provider": session["provider"]
+            "provider": session["provider"],
+            "use_agentic": session.get("use_agentic", False)
         }
         with open(get_state_file(session_id), "w", encoding="utf-8") as f:
             json.dump(state_data, f, ensure_ascii=False, indent=2)
@@ -82,6 +83,7 @@ def load_all_session_states():
                             "source_lang": data["source_lang"],
                             "target_lang": data["target_lang"],
                             "provider": data["provider"],
+                            "use_agentic": data.get("use_agentic", False),
                             "queue": asyncio.Queue()
                         }
                     logger.info(f"Đã khôi phục session {session_id} từ file trạng thái.")
@@ -104,6 +106,7 @@ class TranslateRequest(BaseModel):
     source_lang: str = "Trung Quốc"
     target_lang: str = "Tiếng Việt"
     provider: str = "gemini"
+    use_agentic: bool = False
 
 class DownloadRequest(BaseModel):
     text: str
@@ -272,15 +275,15 @@ async def run_translation_task(session_id: str):
         })
         
         try:
-            translation = await asyncio.to_thread(
-                novel_translator.translate_chunk,
+            translation = await novel_translator.translate_chunk(
                 chunk,
                 session["glossary"],
                 session["api_key"],
                 session["model"],
                 session["source_lang"],
                 session["target_lang"],
-                session["provider"]
+                session["provider"],
+                use_agentic=session.get("use_agentic", False)
             )
             
             if session["is_paused"]:
@@ -418,6 +421,7 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
         "source_lang": request.source_lang,
         "target_lang": request.target_lang,
         "provider": provider,
+        "use_agentic": request.use_agentic,
         "queue": asyncio.Queue()
     }
     save_session_state(session_id)
