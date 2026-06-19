@@ -6,8 +6,8 @@ import asyncio
 import httpx
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
-import google.generativeai as genai
-import google.api_core.exceptions
+from google import genai
+from google.genai import types, errors
 from anthropic import Anthropic, AsyncAnthropic
 from openai import OpenAI, AsyncOpenAI
 
@@ -22,7 +22,7 @@ class BaseTranslator(ABC):
     """
     async def translate_chunk(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         import hashlib
-        from database import SessionLocal, TranslationMemory
+        from database import get_db_session, TranslationMemory
         from sqlalchemy.exc import IntegrityError
 
         # 1. Chuẩn hóa đoạn văn
@@ -39,16 +39,14 @@ class BaseTranslator(ABC):
 
         if use_cache:
             def query_db():
-                db = SessionLocal()
                 try:
-                    record = db.query(TranslationMemory).filter(TranslationMemory.source_hash == source_hash).first()
-                    if record:
-                        logger.info(f"Translation Memory HIT for hash: {source_hash}")
-                        return record.target_text
+                    with get_db_session() as db:
+                        record = db.query(TranslationMemory).filter(TranslationMemory.source_hash == source_hash).first()
+                        if record:
+                            logger.info(f"Translation Memory HIT for hash: {source_hash}")
+                            return record.target_text
                 except Exception as e:
                     logger.error(f"Lỗi truy vấn Translation Memory: {e}")
-                finally:
-                    db.close()
                 return None
 
             cached_text = await asyncio.to_thread(query_db)
@@ -61,23 +59,19 @@ class BaseTranslator(ABC):
         # 4. Ghi lại kết quả dịch mới vào Translation Memory
         if use_cache and translated_text and translated_text.strip():
             def save_db():
-                db = SessionLocal()
                 try:
-                    new_record = TranslationMemory(
-                        source_hash=source_hash,
-                        source_text=clean_chunk,
-                        target_text=translated_text.strip()
-                    )
-                    db.add(new_record)
-                    db.commit()
+                    with get_db_session() as db:
+                        new_record = TranslationMemory(
+                            source_hash=source_hash,
+                            source_text=clean_chunk,
+                            target_text=translated_text.strip()
+                        )
+                        db.add(new_record)
                     logger.info(f"Translation Memory SAVED for hash: {source_hash}")
                 except IntegrityError:
-                    db.rollback()
+                    pass
                 except Exception as e:
-                    db.rollback()
                     logger.error(f"Lỗi ghi Translation Memory: {e}")
-                finally:
-                    db.close()
 
             await asyncio.to_thread(save_db)
 
@@ -100,7 +94,7 @@ class GeminiTranslator(BaseTranslator):
         if not api_key:
             raise ValueError("Cần cung cấp Gemini API Key để dịch thuật.")
             
-        genai.configure(api_key=api_key)
+        client = genai.Client(api_key=api_key)
 
         glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
         context_str = previous_context if previous_context else "Không có"
@@ -122,21 +116,20 @@ class GeminiTranslator(BaseTranslator):
                 from utils import resolve_model_name
                 resolved_model = await asyncio.to_thread(resolve_model_name, model_name, api_key)
                 
-                model = genai.GenerativeModel(
-                    model_name=resolved_model,
-                    system_instruction=system_prompt
+                response = await client.aio.models.generate_content(
+                    model=resolved_model,
+                    contents=chunk,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_prompt
+                    )
                 )
-                
-                response = await model.generate_content_async(chunk)
 
                 if response.text:
                     return response.text
                 
                 raise ValueError("API trả về phản hồi rỗng.")
 
-            except (google.api_core.exceptions.ResourceExhausted, 
-                    google.api_core.exceptions.ServiceUnavailable, 
-                    Exception) as e:
+            except (errors.APIError, Exception) as e:
                 
                 if attempt > max_retries:
                     logger.error(f"Đã thử lại {max_retries} lần nhưng vẫn thất bại khi dịch đoạn này. Lỗi: {e}")

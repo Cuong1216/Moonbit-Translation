@@ -2,7 +2,8 @@ import os
 import json
 import logging
 import asyncio
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import Dict, List, Tuple
 
 # Thiết lập logging
@@ -57,9 +58,8 @@ class GlossaryBuilder:
         """
         if not api_key:
             raise ValueError("Cần cung cấp Gemini API Key để thực hiện trích xuất thuật ngữ.")
-
-        # Cấu hình API Key
-        genai.configure(api_key=api_key)
+            
+        client = genai.Client(api_key=api_key)
 
         system_instruction = (
             "Bạn là chuyên gia ngôn ngữ học. Đối chiếu bản gốc và bản dịch. "
@@ -80,13 +80,14 @@ class GlossaryBuilder:
             resolved_model = await asyncio.to_thread(resolve_model_name, "gemini-1.5-flash", api_key)
             
             # Sử dụng model đã giải quyết thích hợp
-            model = genai.GenerativeModel(
-                model_name=resolved_model,
-                generation_config={"response_mime_type": "application/json"},
-                system_instruction=system_instruction
+            response = await client.aio.models.generate_content(
+                model=resolved_model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json"
+                )
             )
-
-            response = await model.generate_content_async(user_prompt)
 
             # Phân tích cú pháp JSON kết quả
             if response.text:

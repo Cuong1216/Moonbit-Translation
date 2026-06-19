@@ -3,22 +3,21 @@ import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from services.translator import novel_translator
 
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.list_models")
-@patch("google.generativeai.configure")
+@patch("google.genai.Client")
 @pytest.mark.asyncio
-async def test_translate_chunk_success(mock_configure, mock_list_models, mock_generative_model):
-    # Setup mock for list_models
+async def test_translate_chunk_success(mock_client_class):
+    # Setup mock for models.list
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+
     dummy_model = MagicMock()
     dummy_model.name = "models/gemini-1.5-flash"
-    mock_list_models.return_value = [dummy_model]
+    mock_client.models.list.return_value = [dummy_model]
 
-    # Setup mock for GenerativeModel instance
-    mock_model_instance = MagicMock()
+    # Setup mock for Client generate_content (async)
     mock_response = MagicMock()
     mock_response.text = "Đây là bản dịch tiếng Việt."
-    mock_model_instance.generate_content_async = AsyncMock(return_value=mock_response)
-    mock_generative_model.return_value = mock_model_instance
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
     # Run translate_chunk
     result = await novel_translator.translate_chunk(
@@ -32,28 +31,28 @@ async def test_translate_chunk_success(mock_configure, mock_list_models, mock_ge
 
     # Assertions
     assert result == "Đây là bản dịch tiếng Việt."
-    mock_configure.assert_any_call(api_key="fake-key")
-    mock_generative_model.assert_called_once()
+    mock_client_class.assert_any_call(api_key="fake-key")
     
     # Check that system instruction contains correct source and target language
-    kwargs = mock_generative_model.call_args[1]
-    system_instruction = kwargs.get("system_instruction", "")
+    kwargs = mock_client.aio.models.generate_content.call_args[1]
+    config = kwargs.get("config")
+    system_instruction = config.system_instruction
     assert "Tiếng Anh" in system_instruction
     assert "Tiếng Việt" in system_instruction
 
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.list_models")
+@patch("google.genai.Client")
 @pytest.mark.asyncio
-async def test_translate_chunk_with_glossary(mock_list_models, mock_generative_model):
+async def test_translate_chunk_with_glossary(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+
     dummy_model = MagicMock()
     dummy_model.name = "models/gemini-1.5-flash"
-    mock_list_models.return_value = [dummy_model]
+    mock_client.models.list.return_value = [dummy_model]
 
-    mock_model_instance = MagicMock()
     mock_response = MagicMock()
     mock_response.text = "Tiêu Viêm tu luyện Luyện Khí."
-    mock_model_instance.generate_content_async = AsyncMock(return_value=mock_response)
-    mock_generative_model.return_value = mock_model_instance
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
     glossary = {"Xiao Yan": "Tiêu Viêm", "Qi Refining": "Luyện Khí"}
     result = await novel_translator.translate_chunk(
@@ -65,27 +64,28 @@ async def test_translate_chunk_with_glossary(mock_list_models, mock_generative_m
     )
 
     assert result == "Tiêu Viêm tu luyện Luyện Khí."
-    kwargs = mock_generative_model.call_args[1]
-    system_instruction = kwargs.get("system_instruction", "")
+    kwargs = mock_client.aio.models.generate_content.call_args[1]
+    config = kwargs.get("config")
+    system_instruction = config.system_instruction
     assert "- Xiao Yan -> Tiêu Viêm" in system_instruction
     assert "- Qi Refining -> Luyện Khí" in system_instruction
 
 @patch("asyncio.sleep")
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.list_models")
+@patch("google.genai.Client")
 @pytest.mark.asyncio
-async def test_translate_chunk_retry_on_failure(mock_list_models, mock_generative_model, mock_sleep):
+async def test_translate_chunk_retry_on_failure(mock_client_class, mock_sleep):
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+
     dummy_model = MagicMock()
     dummy_model.name = "models/gemini-1.5-flash"
-    mock_list_models.return_value = [dummy_model]
+    mock_client.models.list.return_value = [dummy_model]
 
-    mock_model_instance = MagicMock()
     mock_response = MagicMock()
     mock_response.text = "Bản dịch sau khi thử lại."
     
     # First call throws error, second call succeeds
-    mock_model_instance.generate_content_async = AsyncMock(side_effect=[Exception("Temporary error"), mock_response])
-    mock_generative_model.return_value = mock_model_instance
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=[Exception("Temporary error"), mock_response])
 
     result = await novel_translator.translate_chunk(
         chunk="Hello",
@@ -94,24 +94,24 @@ async def test_translate_chunk_retry_on_failure(mock_list_models, mock_generativ
     )
 
     assert result == "Bản dịch sau khi thử lại."
-    assert mock_model_instance.generate_content_async.call_count == 2
+    assert mock_client.aio.models.generate_content.call_count == 2
     mock_sleep.assert_called_once_with(5)
 
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.list_models")
+@patch("google.genai.Client")
 @pytest.mark.asyncio
-async def test_translate_full_novel(mock_list_models, mock_generative_model):
+async def test_translate_full_novel(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+
     dummy_model = MagicMock()
     dummy_model.name = "models/gemini-1.5-flash"
-    mock_list_models.return_value = [dummy_model]
+    mock_client.models.list.return_value = [dummy_model]
 
-    mock_model_instance = MagicMock()
     mock_response_1 = MagicMock()
     mock_response_1.text = "Đoạn một được dịch."
     mock_response_2 = MagicMock()
     mock_response_2.text = "Đoạn hai được dịch."
-    mock_model_instance.generate_content_async = AsyncMock(side_effect=[mock_response_1, mock_response_2])
-    mock_generative_model.return_value = mock_model_instance
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=[mock_response_1, mock_response_2])
 
     text = "Chunk one.\nChunk two."
     
@@ -125,7 +125,7 @@ async def test_translate_full_novel(mock_list_models, mock_generative_model):
     )
 
     assert result == "Đoạn một được dịch.\n\nĐoạn hai được dịch."
-    assert mock_model_instance.generate_content_async.call_count == 2
+    assert mock_client.aio.models.generate_content.call_count == 2
 
 @patch("services.translator.AsyncAnthropic")
 @pytest.mark.asyncio
@@ -324,19 +324,19 @@ async def test_translate_full_novel_sliding_window():
         assert calls[4] == ("Chunk 5", "Translated Chunk 2\n\nTranslated Chunk 3\n\nTranslated Chunk 4")
 
 
-@patch("google.generativeai.GenerativeModel")
-@patch("google.generativeai.list_models")
+@patch("google.genai.Client")
 @pytest.mark.asyncio
-async def test_gemini_translator_with_context(mock_list_models, mock_generative_model):
+async def test_gemini_translator_with_context(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+
     dummy_model = MagicMock()
     dummy_model.name = "models/gemini-1.5-flash"
-    mock_list_models.return_value = [dummy_model]
+    mock_client.models.list.return_value = [dummy_model]
 
-    mock_model_instance = MagicMock()
     mock_response = MagicMock()
     mock_response.text = "Bản dịch tiếng Việt."
-    mock_model_instance.generate_content_async = AsyncMock(return_value=mock_response)
-    mock_generative_model.return_value = mock_model_instance
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
     result = await novel_translator.translate_chunk(
         chunk="Hello",
@@ -346,8 +346,9 @@ async def test_gemini_translator_with_context(mock_list_models, mock_generative_
     )
 
     assert result == "Bản dịch tiếng Việt."
-    kwargs = mock_generative_model.call_args[1]
-    system_instruction = kwargs.get("system_instruction", "")
+    kwargs = mock_client.aio.models.generate_content.call_args[1]
+    config = kwargs.get("config")
+    system_instruction = config.system_instruction
     assert "Ngữ cảnh từ các đoạn trước: Previously translated paragraph." in system_instruction
 
 

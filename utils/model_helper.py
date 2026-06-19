@@ -1,5 +1,6 @@
 import logging
-import google.generativeai as genai
+from google import genai
+import os
 
 logger = logging.getLogger("ModelHelper")
 
@@ -13,12 +14,14 @@ def resolve_model_name(requested_model: str, api_key: str = None) -> str:
     :param api_key: API Key để truy vấn (nếu có).
     :return: Tên model khả dụng hoặc model được yêu cầu ban đầu làm fallback.
     """
-    if api_key:
-        genai.configure(api_key=api_key)
+    effective_api_key = api_key or os.environ.get("GEMINI_API_KEY")
+    if not effective_api_key:
+        return requested_model
         
     try:
         # Lấy danh sách models khả dụng cho khóa API này
-        available_models = [m.name for m in genai.list_models()]
+        client = genai.Client(api_key=effective_api_key)
+        available_models = [m.name for m in client.models.list()]
         logger.info(f"Các model khả dụng trên API Key: {available_models}")
         
         # Chuẩn hóa tên model yêu cầu để đối chiếu
