@@ -132,6 +132,16 @@ class TermItem(BaseModel):
 class TermsUpdate(BaseModel):
     terms: List[TermItem]
 
+class TranslateChunkRequest(BaseModel):
+    source_text: str
+    custom_prompt: Optional[str] = None
+    glossary_id: Optional[int] = None
+    model_name: str
+    api_key: Optional[str] = None
+    provider: Optional[str] = "gemini"
+    source_lang: Optional[str] = "Trung Quốc"
+    target_lang: Optional[str] = "Tiếng Việt"
+
 
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -358,7 +368,8 @@ async def event_generator(session_id: str):
             'current_chunk_idx': session["current_chunk_idx"],
             'total_chunks': session["total_chunks"],
             'chunks': session["chunks"][:session["current_chunk_idx"]],
-            'translated_chunks': session["translated_chunks"]
+            'translated_chunks': session["translated_chunks"],
+            'glossary': session["glossary"]
         }
         yield f"data: {json.dumps(restore_data, ensure_ascii=False)}\n\n"
     
@@ -431,6 +442,56 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
     asyncio.create_task(run_translation_task(session_id))
 
     return {"status": "started", "session_id": session_id}
+
+@router.post("/translate-chunk")
+async def translate_chunk_endpoint(request: TranslateChunkRequest, db: Session = Depends(get_db)):
+    """
+    Dịch lại một đoạn văn cụ thể (chunk) với tùy chọn custom prompt và bỏ qua cache.
+    """
+    provider = (request.provider or "gemini").strip().lower()
+    
+    key = request.api_key
+    if not key:
+        if provider == "gemini":
+            key = os.getenv("GEMINI_API_KEY")
+        elif provider == "claude":
+            key = os.getenv("ANTHROPIC_API_KEY")
+        elif provider == "openrouter":
+            key = os.getenv("OPENROUTER_API_KEY")
+
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Không tìm thấy API Key cho {provider}. Vui lòng thiết lập trong Cài đặt."
+        )
+
+    glossary_dict = {}
+    if request.glossary_id is not None:
+        terms = db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == request.glossary_id).all()
+        glossary_dict = {t.source_term: t.target_term for t in terms}
+
+    try:
+        # Chạy dịch trực tiếp qua novel_translator và tắt cache (use_cache=False)
+        translation = await novel_translator.translate_chunk(
+            chunk=request.source_text,
+            glossary_dict=glossary_dict,
+            api_key=key,
+            model_name=request.model_name,
+            source_lang=request.source_lang or "Trung Quốc",
+            target_lang=request.target_lang or "Tiếng Việt",
+            provider=provider,
+            use_agentic=False,
+            previous_context="",
+            custom_prompt=request.custom_prompt,
+            use_cache=False
+        )
+        return {"translated_text": translation}
+    except Exception as e:
+        logger.error(f"Lỗi dịch chunk đơn lẻ: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi hệ thống khi dịch lại đoạn văn: {str(e)}"
+        )
 
 @router.get("/stream")
 async def stream_endpoint(session_id: str):

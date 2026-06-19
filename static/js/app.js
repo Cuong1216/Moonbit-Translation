@@ -62,6 +62,77 @@ document.addEventListener('DOMContentLoaded', () => {
             .replace(/'/g, "&#039;");
     }
 
+    function escapeRegExp(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function compileGlossaryRegex(glossary) {
+        const keys = Object.keys(glossary || {});
+        if (keys.length === 0) return null;
+        const sortedKeys = keys.sort((a, b) => b.length - a.length);
+        const escapedKeys = sortedKeys.map(k => escapeRegExp(k));
+        const pattern = escapedKeys.join('|');
+        return new RegExp(pattern, 'gi');
+    }
+
+    function compileTargetGlossaryRegex(glossary) {
+        const values = Object.values(glossary || {});
+        if (values.length === 0) return null;
+        const sortedValues = values.sort((a, b) => b.length - a.length);
+        const escapedValues = sortedValues.map(v => escapeRegExp(v));
+        const pattern = escapedValues.join('|');
+        return new RegExp(pattern, 'gi');
+    }
+
+    function highlightGlossaryTerms(text, glossary) {
+        const regex = compileGlossaryRegex(glossary);
+        if (!regex) return escapeHtml(text);
+        
+        const lookup = {};
+        for (const [src, tgt] of Object.entries(glossary)) {
+            lookup[src.toLowerCase()] = { src, tgt };
+        }
+        
+        const escapedText = escapeHtml(text);
+        return escapedText.replace(regex, (match) => {
+            const entry = lookup[match.toLowerCase()];
+            if (entry) {
+                return `<span class="badge bg-primary-subtle border border-primary text-primary tooltip-term" title="Từ dịch: ${escapeHtml(entry.tgt)}">${escapeHtml(match)}</span>`;
+            }
+            return match;
+        });
+    }
+
+    function highlightTargetGlossaryTerms(text, glossary) {
+        const regex = compileTargetGlossaryRegex(glossary);
+        if (!regex) return escapeHtml(text);
+        
+        const lookup = {};
+        for (const [src, tgt] of Object.entries(glossary)) {
+            lookup[tgt.toLowerCase()] = { src, tgt };
+        }
+        
+        const escapedText = escapeHtml(text);
+        return escapedText.replace(regex, (match) => {
+            const entry = lookup[match.toLowerCase()];
+            if (entry) {
+                return `<span class="badge bg-success-subtle border border-success text-success tooltip-term" title="Từ gốc: ${escapeHtml(entry.src)}">${escapeHtml(match)}</span>`;
+            }
+            return match;
+        });
+    }
+
+    // Biến lưu trữ từ vựng SQLite riêng cho Tab Dịch truyện
+    let translationGlossaryTerms = {};
+
+    function getCurrentTranslationGlossary() {
+        const id = translationGlossarySelect.value;
+        if (id) {
+            return translationGlossaryTerms;
+        }
+        return activeGlossary;
+    }
+
     async function loadGlossaryCollections() {
         try {
             const response = await fetch('/api/glossaries');
@@ -230,13 +301,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const response = await fetch(`/api/glossaries/${id}/terms`);
                 if (response.ok) {
                     const data = await response.json();
-                    const count = Object.keys(data.terms || {}).length;
+                    translationGlossaryTerms = data.terms || {};
+                    const count = Object.keys(translationGlossaryTerms).length;
                     activeGlossaryCountText.textContent = `${count} thuật ngữ (SQLite)`;
                 }
             } catch (e) {
                 console.error(e);
             }
         } else {
+            translationGlossaryTerms = {};
             updateGlossaryCountDisplay();
         }
     });
@@ -566,6 +639,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     splitScreenTable.classList.remove('d-none');
                     splitScreenBody.innerHTML = "";
 
+                    // Nhận glossary từ backend (nếu có) khi khôi phục session
+                    if (eventData.glossary) {
+                        translationGlossaryTerms = eventData.glossary;
+                    }
+                    const glossary = getCurrentTranslationGlossary();
+
                     const chunks = eventData.chunks || [];
                     const translatedChunks = eventData.translated_chunks || [];
 
@@ -576,10 +655,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
                             <td style="vertical-align: top; padding: 10px;">
-                                <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
+                                <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${highlightGlossaryTerms(sourcePart, glossary)}</div>
                             </td>
                             <td style="vertical-align: top; padding: 10px;">
-                                <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
+                                <div class="d-flex align-items-start gap-2">
+                                    <div class="form-control bg-dark text-info border-secondary translated-chunk-input" contenteditable="true" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important; overflow: auto; white-space: pre-wrap; word-break: break-word;">${highlightTargetGlossaryTerms(translatedPart, glossary)}</div>
+                                    <button class="btn btn-retranslate-icon btn-sm btn-retranslate" title="Dịch lại đoạn này" style="height: 38px; width: 38px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                        <i class="fa-solid fa-arrows-rotate"></i>
+                                    </button>
+                                </div>
                             </td>
                         `;
                         splitScreenBody.appendChild(tr);
@@ -598,14 +682,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else if (eventData.event === 'chunk_completed') {
                     const translatedPart = eventData.translated_chunk;
                     const sourcePart = eventData.source_chunk || "";
+                    const glossary = getCurrentTranslationGlossary();
 
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td style="vertical-align: top; padding: 10px;">
-                            <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${escapeHtml(sourcePart)}</div>
+                            <div class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.92rem; line-height: 1.5;">${highlightGlossaryTerms(sourcePart, glossary)}</div>
                         </td>
                         <td style="vertical-align: top; padding: 10px;">
-                            <textarea class="form-control bg-dark text-info border-secondary translated-chunk-input" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important;">${translatedPart}</textarea>
+                            <div class="d-flex align-items-start gap-2">
+                                <div class="form-control bg-dark text-info border-secondary translated-chunk-input" contenteditable="true" style="resize: vertical; min-height: 120px; font-size: 0.92rem; font-family: monospace; line-height: 1.5; color: #0dcaf0 !important; overflow: auto; white-space: pre-wrap; word-break: break-word;">${highlightTargetGlossaryTerms(translatedPart, glossary)}</div>
+                                <button class="btn btn-retranslate-icon btn-sm btn-retranslate" title="Dịch lại đoạn này" style="height: 38px; width: 38px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                                    <i class="fa-solid fa-arrows-rotate"></i>
+                                </button>
+                            </div>
                         </td>
                     `;
                     splitScreenBody.appendChild(tr);
@@ -797,14 +887,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 4. EXPORT & DOWNLOAD SERVICES ---
     // Trigger file export helper
     async function triggerExport(format) {
-        // Gom tất cả nội dung đã sửa đổi từ các textarea đối chiếu
+        // Gom tất cả nội dung đã sửa đổi từ các div/textarea đối chiếu
         const textAreas = document.querySelectorAll('.translated-chunk-input');
         let editedTranslationText = "";
 
         if (textAreas.length > 0) {
             const texts = [];
             textAreas.forEach(ta => {
-                texts.push(ta.value);
+                const text = ta.tagName.toLowerCase() === 'textarea' ? ta.value : ta.innerText;
+                texts.push(text);
             });
             editedTranslationText = texts.join("\n\n");
         } else {
@@ -859,6 +950,135 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         triggerExport('docx');
     });
+
+    // --- 5. SINGLE CHUNK RETRANSLATE WORKFLOW ---
+    let retranslateTargetTextarea = null;
+    let retranslateSourceText = null;
+    const retranslateModalEl = document.getElementById('retranslateModal');
+    const retranslateModal = new bootstrap.Modal(retranslateModalEl);
+    const retranslateSourcePreview = document.getElementById('retranslate-source-preview');
+    const customPromptInput = document.getElementById('custom-prompt-input');
+    const btnConfirmRetranslate = document.getElementById('btn-confirm-retranslate');
+
+    function openRetranslateModal(sourceText, textarea) {
+        retranslateTargetTextarea = textarea;
+        retranslateSourceText = sourceText;
+        
+        retranslateSourcePreview.textContent = sourceText;
+        customPromptInput.value = "";
+        
+        retranslateModal.show();
+    }
+
+    // Tự động focus ô nhập prompt khi modal hiện
+    retranslateModalEl.addEventListener('shown.bs.modal', () => {
+        customPromptInput.focus();
+    });
+
+    // Lắng nghe click nút dịch lại trên bảng split screen
+    splitScreenBody.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-retranslate');
+        if (!btn) return;
+
+        const tr = btn.closest('tr');
+        if (!tr) return;
+
+        const sourceDiv = tr.querySelector('.text-secondary');
+        const textarea = tr.querySelector('.translated-chunk-input');
+        if (!sourceDiv || !textarea) return;
+
+        openRetranslateModal(sourceDiv.textContent, textarea);
+    });
+
+    // Xử lý xác nhận dịch lại
+    btnConfirmRetranslate.addEventListener('click', async () => {
+        if (!retranslateSourceText || !retranslateTargetTextarea) return;
+
+        const apiKey = globalApiKeyInput.value.trim();
+        if (!apiKey) {
+            alert('Vui lòng cấu hình API Key trước khi dịch lại!');
+            return;
+        }
+
+        const provider = aiProviderSelect.value;
+        const model = translationModelSelect.value;
+        const sourceLang = sourceLangSelect.value;
+        const targetLang = targetLangSelect.value;
+        const glossaryIdVal = translationGlossarySelect.value;
+        const customPrompt = customPromptInput.value.trim();
+
+        // Loading state
+        btnConfirmRetranslate.disabled = true;
+        btnConfirmRetranslate.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span> Đang dịch...';
+
+        const requestBody = {
+            source_text: retranslateSourceText,
+            custom_prompt: customPrompt,
+            model_name: model,
+            api_key: apiKey,
+            provider: provider,
+            source_lang: sourceLang,
+            target_lang: targetLang
+        };
+
+        if (glossaryIdVal) {
+            requestBody.glossary_id = parseInt(glossaryIdVal);
+        }
+
+        try {
+            const response = await fetch('/api/translate-chunk', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || 'Lỗi từ máy chủ khi dịch lại.');
+            }
+
+            // Cập nhật div/textarea và thêm hiệu ứng nhấp nháy phát sáng
+            if (retranslateTargetTextarea.tagName.toLowerCase() === 'textarea') {
+                retranslateTargetTextarea.value = data.translated_text || "";
+            } else {
+                const glossary = getCurrentTranslationGlossary();
+                retranslateTargetTextarea.innerHTML = highlightTargetGlossaryTerms(data.translated_text || "", glossary);
+            }
+            retranslateTargetTextarea.classList.add('flash-update');
+            setTimeout(() => {
+                retranslateTargetTextarea.classList.remove('flash-update');
+            }, 1500);
+
+            retranslateModal.hide();
+        } catch (e) {
+            console.error(e);
+            alert(`Lỗi dịch thuật: ${e.message}`);
+        } finally {
+            btnConfirmRetranslate.disabled = false;
+            btnConfirmRetranslate.innerHTML = '<i class="fa-solid fa-check me-1"></i> Xác nhận';
+        }
+    });
+
+    // Event delegation for focus (capturing phase) to strip highlight spans when editing
+    splitScreenBody.addEventListener('focus', (e) => {
+        const target = e.target;
+        if (target.classList.contains('translated-chunk-input') && target.tagName.toLowerCase() === 'div') {
+            const cleanText = target.innerText;
+            target.innerText = cleanText;
+        }
+    }, true);
+
+    // Event delegation for blur (capturing phase) to restore highlight spans after editing
+    splitScreenBody.addEventListener('blur', (e) => {
+        const target = e.target;
+        if (target.classList.contains('translated-chunk-input') && target.tagName.toLowerCase() === 'div') {
+            const glossary = getCurrentTranslationGlossary();
+            const text = target.innerText;
+            target.innerHTML = highlightTargetGlossaryTerms(text, glossary);
+        }
+    }, true);
 
     // Phục hồi kết nối khi F5 tab nếu session đang chạy
     const savedSessionId = sessionStorage.getItem('current_session_id');
