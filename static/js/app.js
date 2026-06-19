@@ -772,7 +772,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sync glossary just in case
         syncGlossaryFromTable();
 
-        const provider = aiProviderSelect.value;
         const model = translationModelSelect.value;
         const sourceLang = sourceLangSelect.value;
         const targetLang = targetLangSelect.value;
@@ -1030,7 +1029,6 @@ document.addEventListener('DOMContentLoaded', () => {
             apiKey = 'ollama';
         }
 
-        const provider = aiProviderSelect.value;
         const model = translationModelSelect.value;
         const sourceLang = sourceLangSelect.value;
         const targetLang = targetLangSelect.value;
