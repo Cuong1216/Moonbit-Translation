@@ -261,7 +261,7 @@ class NovelTranslator:
     Hỗ trợ chia nhỏ văn bản thông minh và tự động thử lại khi gặp lỗi.
     """
 
-    def smart_chunking(self, text: str, max_chars: int = 3000) -> List[str]:
+    def smart_chunking(self, text: str, max_chars: int = 1500) -> List[str]:
         if not text:
             return []
             
@@ -329,7 +329,7 @@ class NovelTranslator:
         }
         return translator.translate_chunk(chunk, context)
 
-    def translate_full_novel(self, text: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", max_chars: int = 3000, source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini") -> str:
+    def translate_full_novel(self, text: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", max_chars: int = 1500, source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini") -> str:
         chunks = self.smart_chunking(text, max_chars)
         translated_chunks = []
 
