@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 import google.generativeai as genai
 from typing import Dict, List, Tuple
 
@@ -50,7 +51,7 @@ class GlossaryBuilder:
         logger.info(f"Đã cắt văn bản thành {len(chunks)} đoạn đối chiếu.")
         return chunks
 
-    def extract_terms(self, source_chunk: str, translated_chunk: str, api_key: str) -> Dict[str, str]:
+    async def extract_terms(self, source_chunk: str, translated_chunk: str, api_key: str) -> Dict[str, str]:
         """
         Gọi Gemini API trong chế độ JSON để trích xuất các cặp thuật ngữ từ một cặp đoạn văn bản đối chiếu.
         """
@@ -76,7 +77,7 @@ class GlossaryBuilder:
         try:
             # Import helper để phân tích và chọn model khả dụng tránh lỗi 404
             from utils import resolve_model_name
-            resolved_model = resolve_model_name("gemini-1.5-flash", api_key)
+            resolved_model = await asyncio.to_thread(resolve_model_name, "gemini-1.5-flash", api_key)
             
             # Sử dụng model đã giải quyết thích hợp
             model = genai.GenerativeModel(
@@ -85,9 +86,8 @@ class GlossaryBuilder:
                 system_instruction=system_instruction
             )
 
-            response = model.generate_content(user_prompt)
+            response = await model.generate_content_async(user_prompt)
 
-            
             # Phân tích cú pháp JSON kết quả
             if response.text:
                 terms = json.loads(response.text)
@@ -104,7 +104,7 @@ class GlossaryBuilder:
             logger.error(f"Lỗi xảy ra khi gọi Gemini API để trích xuất thuật ngữ: {e}")
             return {}
 
-    def build_glossary(self, source_text: str, translated_text: str, api_key: str, lines_per_chunk: int = 40) -> Dict[str, str]:
+    async def build_glossary(self, source_text: str, translated_text: str, api_key: str, lines_per_chunk: int = 40) -> Dict[str, str]:
         """
         Lặp qua toàn bộ văn bản gốc và dịch:
         1. Chia nhỏ văn bản thành các đoạn tương ứng.
@@ -121,7 +121,7 @@ class GlossaryBuilder:
             logger.info(f"Đang phân tích đoạn {idx + 1}/{len(chunks)}...")
             
             # Trích xuất cặp từ từ đoạn hiện tại
-            extracted = self.extract_terms(src_chunk, tgt_chunk, api_key)
+            extracted = await self.extract_terms(src_chunk, tgt_chunk, api_key)
             
             # Gộp và đếm tần suất
             for src, tgt in extracted.items():

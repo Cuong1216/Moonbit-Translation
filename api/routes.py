@@ -162,7 +162,7 @@ async def upload_file(file: UploadFile = File(...)):
 
     try:
         # Gọi extractor để lấy plain text
-        extracted_text = file_extractor.extract_text(tmp_path, suffix)
+        extracted_text = await file_extractor.extract_text(tmp_path, suffix)
         return {
             "filename": filename,
             "status": "success",
@@ -211,8 +211,8 @@ async def build_glossary_endpoint(
 
     try:
         # Trích xuất text từ cả hai tệp
-        source_text = file_extractor.extract_text(src_path, src_suffix)
-        translated_text = file_extractor.extract_text(tgt_path, tgt_suffix)
+        source_text = await file_extractor.extract_text(src_path, src_suffix)
+        translated_text = await file_extractor.extract_text(tgt_path, tgt_suffix)
 
         if not source_text.strip() or not translated_text.strip():
             raise HTTPException(
@@ -221,7 +221,7 @@ async def build_glossary_endpoint(
             )
 
         # Chạy glossary_builder
-        glossary = glossary_builder.build_glossary(
+        glossary = await glossary_builder.build_glossary(
             source_text=source_text,
             translated_text=translated_text,
             api_key=key
@@ -275,6 +275,7 @@ async def run_translation_task(session_id: str):
         })
         
         try:
+            previous_context = "\n\n".join(session["translated_chunks"][-3:])
             translation = await novel_translator.translate_chunk(
                 chunk,
                 session["glossary"],
@@ -283,7 +284,8 @@ async def run_translation_task(session_id: str):
                 session["source_lang"],
                 session["target_lang"],
                 session["provider"],
-                use_agentic=session.get("use_agentic", False)
+                use_agentic=session.get("use_agentic", False),
+                previous_context=previous_context
             )
             
             if session["is_paused"]:

@@ -19,7 +19,7 @@ class BaseTranslator(ABC):
     """
     Interface/Abstract Class đại diện cho chiến lược dịch thuật.
     """
-    async def translate_chunk(self, chunk: str, context: Dict[str, Any]) -> str:
+    async def translate_chunk(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         import hashlib
         from database import SessionLocal, TranslationMemory
         from sqlalchemy.exc import IntegrityError
@@ -55,7 +55,7 @@ class BaseTranslator(ABC):
                 return cached_text
 
         # 3. Cache Miss hoặc Bypass: Gọi API dịch thực tế
-        translated_text = await self._translate_chunk_api(chunk, context)
+        translated_text = await self._translate_chunk_api(chunk, context, previous_context)
 
         # 4. Ghi lại kết quả dịch mới vào Translation Memory
         if use_cache and translated_text and translated_text.strip():
@@ -83,12 +83,12 @@ class BaseTranslator(ABC):
         return translated_text
 
     @abstractmethod
-    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
+    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         pass
 
 
 class GeminiTranslator(BaseTranslator):
-    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
+    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "gemini-1.5-flash")
         glossary_dict = context.get("glossary", {})
@@ -101,10 +101,12 @@ class GeminiTranslator(BaseTranslator):
         genai.configure(api_key=api_key)
 
         glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
+        context_str = previous_context if previous_context else "Không có"
 
         system_prompt = (
             f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
             f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
+            f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
             "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
         )
 
@@ -146,7 +148,7 @@ class GeminiTranslator(BaseTranslator):
 
 
 class ClaudeTranslator(BaseTranslator):
-    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
+    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "claude-3-haiku-20240307")
         glossary_dict = context.get("glossary", {})
@@ -157,10 +159,12 @@ class ClaudeTranslator(BaseTranslator):
             raise ValueError("Cần cung cấp Claude API Key để dịch thuật.")
 
         glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
+        context_str = previous_context if previous_context else "Không có"
 
         system_prompt = (
             f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
             f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
+            f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
             "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
         )
 
@@ -223,7 +227,7 @@ class OpenRouterTranslator(BaseTranslator):
                 await asyncio.sleep(delay)
         return ""
 
-    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
+    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "deepseek/deepseek-chat")
         glossary_dict = context.get("glossary", {})
@@ -239,16 +243,24 @@ class OpenRouterTranslator(BaseTranslator):
             api_key=api_key
         )
 
+        context_str = previous_context if previous_context else "Không có"
+
         if use_agentic:
             # Vòng 1: Dịch thô
             raw_model = "google/gemini-2.5-flash"
-            raw_prompt = "Dịch sát nghĩa đen đoạn văn sau sang Tiếng Việt"
+            raw_prompt = (
+                f"Dịch sát nghĩa đen đoạn văn sau sang Tiếng Việt. "
+                f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường."
+            )
             logger.info(f"OpenRouter Agentic Vòng 1 (Dịch thô) với model: {raw_model}")
             raw_translation = await self._call_api_with_backoff(client, raw_model, raw_prompt, chunk)
             
             # Vòng 2: Biên tập
             edit_model = "meta-llama/llama-3-8b-instruct:free"
-            edit_prompt = "Biên tập lại bản dịch thô sau cho văn phong thuần Việt, giữ nguyên ý nghĩa gốc, sửa lỗi ngữ pháp"
+            edit_prompt = (
+                f"Biên tập lại bản dịch thô sau cho văn phong thuần Việt, giữ nguyên ý nghĩa gốc, sửa lỗi ngữ pháp. "
+                f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường."
+            )
             logger.info(f"OpenRouter Agentic Vòng 2 (Biên tập) với model: {edit_model}")
             final_translation = await self._call_api_with_backoff(client, edit_model, edit_prompt, raw_translation)
             
@@ -258,6 +270,7 @@ class OpenRouterTranslator(BaseTranslator):
             system_prompt = (
                 f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
                 f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
+                f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
                 "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
             )
             return await self._call_api_with_backoff(client, model_name, system_prompt, chunk)
@@ -340,7 +353,7 @@ class NovelTranslator:
         logger.info(f"Đã chia văn bản thành {len(chunks)} đoạn dịch thông minh.")
         return chunks
 
-    async def translate_chunk(self, chunk: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini", use_agentic: bool = False) -> str:
+    async def translate_chunk(self, chunk: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini", use_agentic: bool = False, previous_context: str = "") -> str:
         """
         Dịch một đoạn sử dụng provider tương ứng.
         """
@@ -353,34 +366,34 @@ class NovelTranslator:
             "target_lang": target_lang,
             "use_agentic": use_agentic
         }
-        return await translator.translate_chunk(chunk, context)
+        return await translator.translate_chunk(chunk, context, previous_context)
 
     async def translate_full_novel(self, text: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", max_chars: int = 1500, source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini", concurrency_limit: int = 5, use_agentic: bool = False) -> str:
         chunks = self.smart_chunking(text, max_chars)
         if not chunks:
             return ""
 
-        semaphore = asyncio.Semaphore(concurrency_limit)
+        context_window = []
+        translated_chunks = []
 
-        async def translate_with_index(idx: int, chunk: str) -> tuple[int, str]:
-            async with semaphore:
-                logger.info(f"Đang dịch đoạn {idx + 1}/{len(chunks)}...")
-                translated = await self.translate_chunk(
-                    chunk=chunk,
-                    glossary_dict=glossary_dict,
-                    api_key=api_key,
-                    model_name=model_name,
-                    source_lang=source_lang,
-                    target_lang=target_lang,
-                    provider=provider,
-                    use_agentic=use_agentic
-                )
-                return idx, translated
-
-        tasks = [translate_with_index(idx, chunk) for idx, chunk in enumerate(chunks)]
-        results = await asyncio.gather(*tasks)
-        results.sort(key=lambda x: x[0])
-        translated_chunks = [translated for idx, translated in results]
+        for idx, chunk in enumerate(chunks):
+            logger.info(f"Đang dịch đoạn {idx + 1}/{len(chunks)}...")
+            previous_context = "\n\n".join(context_window)
+            translated = await self.translate_chunk(
+                chunk=chunk,
+                glossary_dict=glossary_dict,
+                api_key=api_key,
+                model_name=model_name,
+                source_lang=source_lang,
+                target_lang=target_lang,
+                provider=provider,
+                use_agentic=use_agentic,
+                previous_context=previous_context
+            )
+            translated_chunks.append(translated)
+            context_window.append(translated)
+            if len(context_window) > 3:
+                context_window.pop(0)
 
         return "\n\n".join(translated_chunks)
 
