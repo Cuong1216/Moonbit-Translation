@@ -65,6 +65,31 @@
                             <!-- Left controls: File upload and settings -->
                             <div class="col-12 col-lg-4">
                                 <div class="card bg-secondary-dark border-secondary p-4 h-100">
+                                    <!-- Bộ thuật ngữ SQLite -->
+                                    <div class="mb-4 pb-3 border-bottom border-secondary">
+                                        <h3 class="h5 fw-bold mb-3 d-flex align-items-center gap-2 text-purple-glow">
+                                            <i class="fa-solid fa-database animate-pulse"></i> Bộ Thuật Ngữ (SQLite)
+                                        </h3>
+                                        <div class="mb-3">
+                                            <label for="glossary-collection-select" class="form-label fw-semibold text-secondary">Chọn bộ hiện có:</label>
+                                            <div class="d-flex gap-2">
+                                                <select id="glossary-collection-select" class="form-select bg-dark text-light border-secondary">
+                                                    <option value="" disabled selected>-- Chọn bộ thuật ngữ --</option>
+                                                </select>
+                                                <button class="btn btn-outline-danger" id="btn-delete-collection" title="Xóa bộ thuật ngữ"><i class="fa-regular fa-trash-can"></i></button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label class="form-label fw-semibold text-secondary">Tạo bộ thuật ngữ mới:</label>
+                                            <div class="d-flex gap-2">
+                                                <input type="text" id="new-collection-name" class="form-control bg-dark text-light border-secondary" placeholder="Tên bộ mới...">
+                                                <button class="btn btn-purple fw-semibold" id="btn-create-collection" style="white-space: nowrap;">
+                                                    <i class="fa-solid fa-plus"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <h3 class="h5 fw-bold mb-3 d-flex align-items-center gap-2">
                                         <i class="fa-solid fa-robot text-purple"></i> Tự động quét thuật ngữ
                                     </h3>
@@ -197,10 +222,18 @@
                                         </select>
                                     </div>
 
+                                    <!-- Select Glossary Collection for Translation -->
+                                    <div class="mb-3">
+                                        <label for="translation-glossary-select" class="form-label fw-semibold text-secondary">Áp dụng bộ thuật ngữ SQLite:</label>
+                                        <select id="translation-glossary-select" class="form-select bg-dark text-light border-secondary">
+                                            <option value="" selected>-- Không sử dụng (Hoặc dùng Local) --</option>
+                                        </select>
+                                    </div>
+
                                     <!-- Glossary status tracker -->
                                     <div class="mb-4 bg-dark p-3 border border-secondary rounded-3">
                                         <span class="text-secondary small d-block mb-1">Thuật ngữ đang áp dụng:</span>
-                                        <strong id="active-glossary-count" class="text-purple-glow">2 từ khóa</strong>
+                                        <strong id="active-glossary-count" class="text-purple-glow">0 từ khóa</strong>
                                     </div>
 
                                     <div class="d-flex gap-2">
@@ -232,24 +265,35 @@
 
                                     <!-- Download and Output Actions Panel -->
                                     <div class="d-flex justify-content-between align-items-center mb-3">
-                                        <h4 class="h6 fw-bold text-secondary mb-0">Xem trước bản dịch thời gian thực</h4>
+                                        <h4 class="h6 fw-bold text-secondary mb-0">Biên tập song song (Split-screen Editor)</h4>
                                         <div class="d-none" id="download-actions">
                                             <div class="btn-group">
                                                 <button class="btn btn-success btn-sm dropdown-toggle fw-semibold" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                                    <i class="fa-solid fa-download me-1"></i> Tải file kết quả
+                                                    <i class="fa-solid fa-floppy-disk me-1"></i> Lưu & Xuất File
                                                 </button>
                                                 <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end border-secondary">
-                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-txt"><i class="fa-regular fa-file-lines me-2 text-warning"></i>Tải tệp văn bản (.txt)</a></li>
-                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-docx"><i class="fa-regular fa-file-word me-2 text-info"></i>Tải tệp Word (.docx)</a></li>
+                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-txt"><i class="fa-regular fa-file-lines me-2 text-warning"></i>Xuất tệp văn bản (.txt)</a></li>
+                                                    <li><a class="dropdown-item py-2" href="#" id="btn-download-docx"><i class="fa-regular fa-file-word me-2 text-info"></i>Xuất tệp Word (.docx)</a></li>
                                                 </ul>
                                             </div>
                                         </div>
                                     </div>
 
                                     <!-- Realtime output display -->
-                                    <div class="output-preview-container bg-dark border border-secondary p-3 rounded-3 overflow-y-auto" style="height: 300px;">
-                                        <div id="translation-preview-area" class="text-secondary font-monospace" style="white-space: pre-wrap; font-size: 0.95rem;">
-                                            Bản dịch chi tiết sẽ được cập nhật tuần tự tại đây dưới dạng stream khi hệ thống bắt đầu làm việc...
+                                    <div class="output-preview-container bg-dark border border-secondary p-0 rounded-3 overflow-y-auto" style="height: 450px;">
+                                        <table class="table table-dark table-bordered align-middle mb-0 d-none" id="split-screen-table" style="table-layout: fixed; width: 100%;">
+                                            <thead class="table-secondary-dark sticky-top">
+                                                <tr>
+                                                    <th scope="col" style="width: 50%; padding: 10px 15px;">Bản Gốc (Source)</th>
+                                                    <th scope="col" style="width: 50%; padding: 10px 15px;">Bản Dịch (Editable)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="split-screen-body">
+                                                <!-- Chunk rows will be dynamically appended here -->
+                                            </tbody>
+                                        </table>
+                                        <div id="translation-preview-area" class="text-secondary p-3 font-monospace" style="white-space: pre-wrap; font-size: 0.95rem;">
+                                            Bản dịch đối chiếu chi tiết dạng Split-screen sẽ được hiển thị và cập nhật tuần tự tại đây khi hệ thống bắt đầu làm việc...
                                         </div>
                                     </div>
                                 </div>

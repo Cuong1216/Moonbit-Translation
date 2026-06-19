@@ -4,14 +4,18 @@ import docx
 import tempfile
 import asyncio
 import logging
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Depends
 from fastapi.responses import StreamingResponse, FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 # Import các service nghiệp vụ
 from services import file_extractor, glossary_builder, novel_translator
+
+# Import DB
+from sqlalchemy.orm import Session
+from database import get_db, GlossaryCollection, GlossaryTerm
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO)
@@ -61,7 +65,8 @@ load_active_task_state()
 # Pydantic models
 class TranslateRequest(BaseModel):
     text: str
-    glossary: Dict[str, str]
+    glossary: Optional[Dict[str, str]] = None
+    glossary_id: Optional[int] = None
     api_key: Optional[str] = None
     model: str = "gemini-1.5-flash"
     temperature: float = 0.3
@@ -73,6 +78,22 @@ class DownloadRequest(BaseModel):
     text: str
     format: str = "txt"  # "txt" hoặc "docx"
     filename: str = "dich_truyen"
+
+class ExportRequest(BaseModel):
+    text: str
+    format: str = "txt"  # "txt" hoặc "docx"
+    filename: str = "ban_dich"
+
+class CollectionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class TermItem(BaseModel):
+    source_term: str
+    target_term: str
+
+class TermsUpdate(BaseModel):
+    terms: List[TermItem]
 
 
 @router.post("/upload")
@@ -235,6 +256,7 @@ async def event_generator():
                     'status': f'Đoạn {idx + 1} đã dịch xong trước khi tạm dừng.',
                     'progress': int(((idx + 1) / total) * 100),
                     'event': 'chunk_completed',
+                    'source_chunk': chunk,
                     'translated_chunk': translation
                 }, ensure_ascii=False)}\n\n"
                 
@@ -254,6 +276,7 @@ async def event_generator():
                 'status': f'Hoàn thành đoạn {idx + 1}/{total}',
                 'progress': int(((idx + 1) / total) * 100),
                 'event': 'chunk_completed',
+                'source_chunk': chunk,
                 'translated_chunk': translation
             }, ensure_ascii=False)}\n\n"
             
@@ -286,7 +309,7 @@ async def event_generator():
 
 
 @router.post("/translate")
-async def translate_endpoint(request: TranslateRequest):
+async def translate_endpoint(request: TranslateRequest, db: Session = Depends(get_db)):
     """
     Dịch tiểu thuyết sử dụng cơ chế Server-Sent Events (SSE).
     Liên tục cập nhật tiến độ cho Frontend (ví dụ: đang dịch đoạn 5/10)
@@ -318,6 +341,14 @@ async def translate_endpoint(request: TranslateRequest):
             detail="Văn bản nguồn rỗng hoặc không thể chia nhỏ."
         )
 
+    # Lấy Glossary từ DB hoặc request
+    glossary_dict = {}
+    if request.glossary_id is not None:
+        terms = db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == request.glossary_id).all()
+        glossary_dict = {t.source_term: t.target_term for t in terms}
+    elif request.glossary:
+        glossary_dict = request.glossary
+
     # Khởi tạo hoặc ghi đè active_task
     import uuid
     active_task.update({
@@ -327,7 +358,7 @@ async def translate_endpoint(request: TranslateRequest):
         "current_chunk_idx": 0,
         "total_chunks": len(chunks),
         "is_paused": False,
-        "glossary": request.glossary,
+        "glossary": glossary_dict,
         "api_key": key,
         "model": request.model,
         "source_lang": request.source_lang,
@@ -440,3 +471,148 @@ async def download_file_endpoint(request: DownloadRequest):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Lỗi tạo tệp tin Text: {str(e)}"
             )
+
+@router.post("/export")
+async def export_file_endpoint(request: ExportRequest):
+    """
+    Tương tự như download_file_endpoint, nhận nội dung chỉnh sửa từ Frontend
+    và xuất tệp .txt hoặc .docx để người dùng tải về.
+    """
+    if not request.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nội dung xuất file rỗng."
+        )
+
+    # Đảm bảo tên file an toàn
+    safe_filename = "".join([c for c in request.filename if c.isalpha() or c.isdigit() or c in (' ', '_', '-')]).rstrip()
+    if not safe_filename:
+        safe_filename = "ban_dich"
+
+    if request.format == "docx":
+        doc = docx.Document()
+        for para in request.text.split("\n"):
+            doc.add_paragraph(para)
+            
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".docx")
+        tmp_path = tmp.name
+        tmp.close()
+        
+        try:
+            doc.save(tmp_path)
+            cleanup_task = BackgroundTask(lambda: os.path.exists(tmp_path) and os.remove(tmp_path))
+            return FileResponse(
+                tmp_path,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                filename=f"{safe_filename}.docx",
+                background=cleanup_task
+            )
+        except Exception as e:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Lỗi tạo tệp tin Word: {str(e)}"
+            )
+    else:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode="w", encoding="utf-8")
+        tmp_path = tmp.name
+        try:
+            tmp.write(request.text)
+            tmp.close()
+            cleanup_task = BackgroundTask(lambda: os.path.exists(tmp_path) and os.remove(tmp_path))
+            return FileResponse(
+                tmp_path,
+                media_type="text/plain",
+                filename=f"{safe_filename}.txt",
+                background=cleanup_task
+            )
+        except Exception as e:
+            tmp.close()
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Lỗi tạo tệp tin Text: {str(e)}"
+            )
+
+@router.get("/glossaries")
+def get_glossaries(db: Session = Depends(get_db)):
+    collections = db.query(GlossaryCollection).all()
+    result = []
+    for col in collections:
+        count = db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == col.id).count()
+        result.append({
+            "id": col.id,
+            "name": col.name,
+            "description": col.description,
+            "created_at": col.created_at.isoformat() if col.created_at else None,
+            "term_count": count
+        })
+    return result
+
+@router.post("/glossaries")
+def create_glossary(data: CollectionCreate, db: Session = Depends(get_db)):
+    name_clean = data.name.strip()
+    if not name_clean:
+        raise HTTPException(status_code=400, detail="Tên bộ từ vựng không được để trống.")
+    
+    existing = db.query(GlossaryCollection).filter(GlossaryCollection.name == name_clean).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Bộ từ vựng với tên này đã tồn tại.")
+        
+    col = GlossaryCollection(name=name_clean, description=data.description)
+    db.add(col)
+    db.commit()
+    db.refresh(col)
+    return {
+        "status": "success", 
+        "collection": {
+            "id": col.id, 
+            "name": col.name, 
+            "description": col.description,
+            "term_count": 0
+        }
+    }
+
+@router.delete("/glossaries/{id}")
+def delete_glossary(id: int, db: Session = Depends(get_db)):
+    col = db.query(GlossaryCollection).filter(GlossaryCollection.id == id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bộ từ vựng này.")
+    db.delete(col)
+    db.commit()
+    return {"status": "success", "message": "Đã xóa bộ từ vựng thành công."}
+
+@router.get("/glossaries/{id}/terms")
+def get_glossary_terms(id: int, db: Session = Depends(get_db)):
+    col = db.query(GlossaryCollection).filter(GlossaryCollection.id == id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bộ từ vựng này.")
+    
+    terms = db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == id).all()
+    result = {t.source_term: t.target_term for t in terms}
+    return {"status": "success", "terms": result}
+
+@router.post("/glossaries/{id}/terms")
+def update_glossary_terms(id: int, request: TermsUpdate, db: Session = Depends(get_db)):
+    col = db.query(GlossaryCollection).filter(GlossaryCollection.id == id).first()
+    if not col:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bộ từ vựng này.")
+    
+    # Xóa các terms cũ của bộ từ vựng này
+    db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == id).delete()
+    
+    # Thêm các terms mới
+    new_terms = []
+    for t in request.terms:
+        src = t.source_term.strip()
+        tgt = t.target_term.strip()
+        if src and tgt:
+            new_terms.append(GlossaryTerm(collection_id=id, source_term=src, target_term=tgt))
+            
+    if new_terms:
+        db.bulk_save_objects(new_terms)
+        
+    db.commit()
+    return {"status": "success", "message": f"Đã lưu thành công {len(new_terms)} thuật ngữ."}

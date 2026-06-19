@@ -7,6 +7,10 @@ from dotenv import load_dotenv
 # Load environment variables from .env
 load_dotenv()
 
+# Khởi tạo cơ sở dữ liệu SQLite
+from database import init_db
+init_db()
+
 from api.routes import router as api_router
 
 app = FastAPI(

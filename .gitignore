@@ -17,6 +17,9 @@ ENV/
 
 # Project state files
 translation_state.json
+local_app.db
+*.db
+
 
 # Editors / OS temp files
 .vscode/
