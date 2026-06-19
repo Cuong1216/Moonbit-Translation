@@ -1,13 +1,19 @@
 import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey
+from contextlib import contextmanager
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, text
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./local_app.db"
 
-# connect_args={"check_same_thread": False} chỉ cần thiết cho SQLite
+# connect_args={"check_same_thread": False, "timeout": 30} chỉ cần thiết cho SQLite
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False, "timeout": 30}
 )
+
+# Kích hoạt chế độ WAL (Write-Ahead Logging) cho SQLite
+with engine.connect() as conn:
+    conn.execute(text("PRAGMA journal_mode=WAL;"))
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
@@ -45,9 +51,18 @@ class TranslationMemory(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-def get_db():
+@contextmanager
+def get_db_session():
     db = SessionLocal()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
+
+def get_db():
+    with get_db_session() as db:
+        yield db

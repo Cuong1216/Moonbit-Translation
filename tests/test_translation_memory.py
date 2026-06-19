@@ -2,7 +2,7 @@ import pytest
 import hashlib
 from unittest.mock import MagicMock, patch, AsyncMock
 from services.translator import GeminiTranslator
-from database import SessionLocal, TranslationMemory
+from database import get_db_session, TranslationMemory
 
 @pytest.fixture
 def clean_tm_records():
@@ -10,18 +10,14 @@ def clean_tm_records():
     test_hash = hashlib.sha256(test_text.encode("utf-8")).hexdigest()
     
     # Setup: ensure the test key hash does not exist in the db
-    db = SessionLocal()
-    db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).delete()
-    db.commit()
-    db.close()
+    with get_db_session() as db:
+        db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).delete()
     
     yield test_text, test_hash
     
     # Teardown: clean up after the test
-    db = SessionLocal()
-    db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).delete()
-    db.commit()
-    db.close()
+    with get_db_session() as db:
+        db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).delete()
 
 @pytest.mark.asyncio
 async def test_translation_memory_caching_flow(clean_tm_records):
@@ -48,12 +44,11 @@ async def test_translation_memory_caching_flow(clean_tm_records):
         mock_api.assert_called_once_with(test_text, context, "")
         
         # Kiểm tra dữ liệu đã được lưu trữ trong SQLite
-        db = SessionLocal()
-        record = db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).first()
-        assert record is not None
-        assert record.source_text == test_text
-        assert record.target_text == "Bản dịch đã được cache thành công."
-        db.close()
+        with get_db_session() as db:
+            record = db.query(TranslationMemory).filter(TranslationMemory.source_hash == test_hash).first()
+            assert record is not None
+            assert record.source_text == test_text
+            assert record.target_text == "Bản dịch đã được cache thành công."
         
         # Reset mock call count để kiểm tra cho lần thứ hai
         mock_api.reset_mock()
