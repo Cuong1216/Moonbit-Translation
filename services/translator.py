@@ -18,13 +18,68 @@ class BaseTranslator(ABC):
     """
     Interface/Abstract Class đại diện cho chiến lược dịch thuật.
     """
-    @abstractmethod
     def translate_chunk(self, chunk: str, context: Dict[str, Any]) -> str:
+        import hashlib
+        from database import SessionLocal, TranslationMemory
+        from sqlalchemy.exc import IntegrityError
+
+        # 1. Chuẩn hóa đoạn văn
+        clean_chunk = chunk.strip()
+        if not clean_chunk:
+            return ""
+
+        # 2. Xác định cấu hình bypass cache (ví dụ: dùng API key fake trong unit tests)
+        api_key = context.get("api_key", "")
+        is_fake_key = isinstance(api_key, str) and api_key.startswith("fake-")
+        use_cache = context.get("use_cache", True) and not is_fake_key
+
+        source_hash = hashlib.sha256(clean_chunk.encode("utf-8")).hexdigest()
+
+        if use_cache:
+            db = SessionLocal()
+            try:
+                record = db.query(TranslationMemory).filter(TranslationMemory.source_hash == source_hash).first()
+                if record:
+                    logger.info(f"Translation Memory HIT for hash: {source_hash}")
+                    return record.target_text
+            except Exception as e:
+                logger.error(f"Lỗi truy vấn Translation Memory: {e}")
+            finally:
+                db.close()
+
+        # 3. Cache Miss hoặc Bypass: Gọi API dịch thực tế
+        translated_text = self._translate_chunk_api(chunk, context)
+
+        # 4. Ghi lại kết quả dịch mới vào Translation Memory
+        if use_cache and translated_text and translated_text.strip():
+            db = SessionLocal()
+            try:
+                # Tránh chèn bản ghi rỗng hoặc gây crash nếu có xung đột trùng lặp
+                new_record = TranslationMemory(
+                    source_hash=source_hash,
+                    source_text=clean_chunk,
+                    target_text=translated_text.strip()
+                )
+                db.add(new_record)
+                db.commit()
+                logger.info(f"Translation Memory SAVED for hash: {source_hash}")
+            except IntegrityError:
+                db.rollback()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Lỗi ghi Translation Memory: {e}")
+            finally:
+                db.close()
+
+        return translated_text
+
+    @abstractmethod
+    def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
         pass
 
 
 class GeminiTranslator(BaseTranslator):
-    def translate_chunk(self, chunk: str, context: Dict[str, Any]) -> str:
+    def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "gemini-1.5-flash")
         glossary_dict = context.get("glossary", {})
@@ -82,7 +137,7 @@ class GeminiTranslator(BaseTranslator):
 
 
 class ClaudeTranslator(BaseTranslator):
-    def translate_chunk(self, chunk: str, context: Dict[str, Any]) -> str:
+    def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "claude-3-haiku-20240307")
         glossary_dict = context.get("glossary", {})
@@ -131,7 +186,7 @@ class ClaudeTranslator(BaseTranslator):
 
 
 class OpenRouterTranslator(BaseTranslator):
-    def translate_chunk(self, chunk: str, context: Dict[str, Any]) -> str:
+    def _translate_chunk_api(self, chunk: str, context: Dict[str, Any]) -> str:
         api_key = context.get("api_key")
         model_name = context.get("model", "deepseek/deepseek-chat")
         glossary_dict = context.get("glossary", {})

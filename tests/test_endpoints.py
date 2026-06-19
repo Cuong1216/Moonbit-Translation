@@ -1,33 +1,76 @@
 import pytest
+import asyncio
 from fastapi.testclient import TestClient
 from main import app
-from api.routes import active_task
+from api.routes import active_sessions, delete_session_state
 
 client = TestClient(app)
 
-def test_pause_endpoint_no_active_task():
-    active_task["task_id"] = None
-    response = client.post("/api/pause")
-    assert response.status_code == 400
-    assert "Không có tiến trình dịch thuật nào đang chạy" in response.json()["detail"]
+@pytest.fixture
+def mock_session():
+    session_id = "test_session_id"
+    # Setup
+    active_sessions[session_id] = {
+        "chunks": ["Chunk 1", "Chunk 2"],
+        "translated_chunks": ["Bản dịch 1"],
+        "current_chunk_idx": 1,
+        "total_chunks": 2,
+        "is_paused": False,
+        "glossary": {},
+        "model": "gemini-1.5-flash",
+        "source_lang": "zh",
+        "target_lang": "vi",
+        "provider": "gemini",
+        "api_key": "test_api_key",
+        "queue": asyncio.Queue()
+    }
+    yield session_id
+    # Teardown
+    if session_id in active_sessions:
+        del active_sessions[session_id]
+    delete_session_state(session_id)
 
-def test_pause_endpoint_success():
-    active_task["task_id"] = "test_task"
-    active_task["is_paused"] = False
+def test_pause_endpoint_missing_session_id():
     response = client.post("/api/pause")
+    assert response.status_code == 422  # Missing query parameter
+
+def test_pause_endpoint_not_found():
+    response = client.post("/api/pause?session_id=nonexistent_id")
+    assert response.status_code == 404
+    assert "Không tìm thấy phiên dịch thuật này" in response.json()["detail"]
+
+def test_pause_endpoint_success(mock_session):
+    response = client.post(f"/api/pause?session_id={mock_session}")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
-    assert active_task["is_paused"] is True
+    assert active_sessions[mock_session]["is_paused"] is True
 
-def test_resume_endpoint_no_active_task():
-    active_task["task_id"] = None
-    response = client.post("/api/resume")
-    assert response.status_code == 400
-    assert "Không có tiến trình nào để tiếp tục" in response.json()["detail"]
+def test_resume_endpoint_not_found():
+    response = client.post("/api/resume?session_id=nonexistent_id")
+    assert response.status_code == 404
+    assert "Không tìm thấy phiên dịch thuật để tiếp tục" in response.json()["detail"]
 
-def test_resume_endpoint_already_running():
-    active_task["task_id"] = "test_task"
-    active_task["is_paused"] = False
-    response = client.post("/api/resume")
+def test_resume_endpoint_already_running(mock_session):
+    response = client.post(f"/api/resume?session_id={mock_session}")
     assert response.status_code == 200
     assert response.json()["status"] == "ignored"
+
+def test_resume_endpoint_success(mock_session):
+    active_sessions[mock_session]["is_paused"] = True
+    response = client.post(f"/api/resume?session_id={mock_session}", json={"api_key": "new_key"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "resumed"
+    assert active_sessions[mock_session]["is_paused"] is False
+    assert active_sessions[mock_session]["api_key"] == "new_key"
+
+def test_stream_endpoint_not_found():
+    response = client.get("/api/stream?session_id=nonexistent_id")
+    assert response.status_code == 404
+    assert "Không tìm thấy phiên dịch thuật này" in response.json()["detail"]
+
+def test_stream_endpoint_success(mock_session):
+    active_sessions[mock_session]["queue"].put_nowait({"event": "completed"})
+    with client.stream("GET", f"/api/stream?session_id={mock_session}") as response:
+        assert response.status_code == 200
+        assert "text/event-stream" in response.headers["content-type"]
+

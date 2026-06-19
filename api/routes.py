@@ -23,44 +23,75 @@ logger = logging.getLogger("APIRoutes")
 
 router = APIRouter(prefix="/api", tags=["API"])
 
-# Trạng thái tiến trình dịch toàn cục
-active_task = {
-    "task_id": None,
-    "chunks": [],
-    "translated_chunks": [],
-    "current_chunk_idx": 0,
-    "total_chunks": 0,
-    "is_paused": False,
-    "glossary": {},
-    "api_key": None,
-    "model": None,
-    "source_lang": None,
-    "target_lang": None,
-    "provider": None
-}
+# Trạng thái tiến trình dịch đa session
+active_sessions = {}
 
-STATE_FILE = "translation_state.json"
+def get_state_file(session_id: str) -> str:
+    safe_id = "".join([c for c in session_id if c.isalnum() or c in ('-', '_')])
+    return f"state_{safe_id}.json"
 
-def save_active_task_state():
+def save_session_state(session_id: str):
+    session = active_sessions.get(session_id)
+    if not session:
+        return
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(active_task, f, ensure_ascii=False, indent=2)
+        state_data = {
+            "task_id": session_id,
+            "chunks": session["chunks"],
+            "translated_chunks": session["translated_chunks"],
+            "current_chunk_idx": session["current_chunk_idx"],
+            "total_chunks": session["total_chunks"],
+            "is_paused": session["is_paused"],
+            "glossary": session["glossary"],
+            "model": session["model"],
+            "source_lang": session["source_lang"],
+            "target_lang": session["target_lang"],
+            "provider": session["provider"]
+        }
+        with open(get_state_file(session_id), "w", encoding="utf-8") as f:
+            json.dump(state_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        logger.error(f"Lỗi lưu file trạng thái dịch: {e}")
+        logger.error(f"Lỗi lưu file trạng thái session {session_id}: {e}")
 
-def load_active_task_state():
-    global active_task
-    if os.path.exists(STATE_FILE):
+def delete_session_state(session_id: str):
+    file_path = get_state_file(session_id)
+    if os.path.exists(file_path):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                active_task.update(data)
-                logger.info(f"Đã khôi phục trạng thái dịch trước đó: Task ID = {active_task['task_id']}, Tiến trình = {active_task['current_chunk_idx']}/{active_task['total_chunks']}")
-        except Exception as e:
-            logger.error(f"Lỗi đọc file trạng thái dịch: {e}")
+            os.remove(file_path)
+        except Exception:
+            pass
 
-# Khôi phục trạng thái khi module được tải
-load_active_task_state()
+def load_all_session_states():
+    global active_sessions
+    try:
+        for file_name in os.listdir("."):
+            if file_name.startswith("state_") and file_name.endswith(".json"):
+                session_id = file_name.replace("state_", "").replace(".json", "")
+                try:
+                    with open(file_name, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        active_sessions[session_id] = {
+                            "chunks": data["chunks"],
+                            "translated_chunks": data["translated_chunks"],
+                            "current_chunk_idx": data["current_chunk_idx"],
+                            "total_chunks": data["total_chunks"],
+                            "is_paused": data["is_paused"],
+                            "glossary": data["glossary"],
+                            "api_key": None,  # Sẽ được nạp lại khi Resume
+                            "model": data["model"],
+                            "source_lang": data["source_lang"],
+                            "target_lang": data["target_lang"],
+                            "provider": data["provider"],
+                            "queue": asyncio.Queue()
+                        }
+                    logger.info(f"Đã khôi phục session {session_id} từ file trạng thái.")
+                except Exception as e:
+                    logger.error(f"Lỗi khôi phục session {session_id}: {e}")
+    except Exception as e:
+        logger.error(f"Lỗi khi quét file trạng thái session: {e}")
+
+# Khôi phục trạng thái các session khi module được tải
+load_all_session_states()
 
 # Pydantic models
 class TranslateRequest(BaseModel):
@@ -83,6 +114,9 @@ class ExportRequest(BaseModel):
     text: str
     format: str = "txt"  # "txt" hoặc "docx"
     filename: str = "ban_dich"
+
+class ResumeRequest(BaseModel):
+    api_key: Optional[str] = None
 
 class CollectionCreate(BaseModel):
     name: str
@@ -209,115 +243,137 @@ async def build_glossary_endpoint(
                 os.remove(path)
 
 
-async def event_generator():
-    total = active_task["total_chunks"]
+async def run_translation_task(session_id: str):
+    session = active_sessions.get(session_id)
+    if not session:
+        return
     
-    while active_task["current_chunk_idx"] < total:
-        idx = active_task["current_chunk_idx"]
-        
-        # Kiểm tra xem có lệnh Pause không
-        if active_task["is_paused"]:
-            yield f"data: {json.dumps({
-                'status': 'Đã tạm dừng dịch thuật.',
-                'progress': int((idx / total) * 100),
-                'event': 'paused',
-                'current_chunk_idx': idx
-            }, ensure_ascii=False)}\n\n"
+    total = session["total_chunks"]
+    queue = session["queue"]
+    
+    while session["current_chunk_idx"] < total:
+        if session["is_paused"]:
+            await queue.put({
+                "status": "Đã tạm dừng dịch thuật.",
+                "progress": int((session["current_chunk_idx"] / total) * 100),
+                "event": "paused",
+                "current_chunk_idx": session["current_chunk_idx"]
+            })
             return
             
-        chunk = active_task["chunks"][idx]
+        idx = session["current_chunk_idx"]
+        chunk = session["chunks"][idx]
         progress = int((idx / total) * 100)
         
-        yield f"data: {json.dumps({
-            'status': f'Đang dịch đoạn {idx + 1}/{total}...',
-            'progress': progress,
-            'event': 'translating'
-        }, ensure_ascii=False)}\n\n"
+        await queue.put({
+            "status": f"Đang dịch đoạn {idx + 1}/{total}...",
+            "progress": progress,
+            "event": "translating"
+        })
         
         try:
             translation = await asyncio.to_thread(
                 novel_translator.translate_chunk,
                 chunk,
-                active_task["glossary"],
-                active_task["api_key"],
-                active_task["model"],
-                active_task["source_lang"],
-                active_task["target_lang"],
-                active_task["provider"]
+                session["glossary"],
+                session["api_key"],
+                session["model"],
+                session["source_lang"],
+                session["target_lang"],
+                session["provider"]
             )
             
-            # Kiểm tra xem có bị tạm dừng trong quá trình call API không
-            if active_task["is_paused"]:
-                active_task["translated_chunks"].append(translation)
-                active_task["current_chunk_idx"] += 1
-                save_active_task_state()
+            if session["is_paused"]:
+                session["translated_chunks"].append(translation)
+                session["current_chunk_idx"] += 1
+                save_session_state(session_id)
                 
-                yield f"data: {json.dumps({
-                    'status': f'Đoạn {idx + 1} đã dịch xong trước khi tạm dừng.',
-                    'progress': int(((idx + 1) / total) * 100),
-                    'event': 'chunk_completed',
-                    'source_chunk': chunk,
-                    'translated_chunk': translation
-                }, ensure_ascii=False)}\n\n"
+                await queue.put({
+                    "status": f"Đoạn {idx + 1} đã dịch xong trước khi tạm dừng.",
+                    "progress": int(((idx + 1) / total) * 100),
+                    "event": "chunk_completed",
+                    "source_chunk": chunk,
+                    "translated_chunk": translation
+                })
                 
-                yield f"data: {json.dumps({
-                    'status': 'Đã tạm dừng dịch thuật.',
-                    'progress': int(((idx + 1) / total) * 100),
-                    'event': 'paused',
-                    'current_chunk_idx': idx + 1
-                }, ensure_ascii=False)}\n\n"
+                await queue.put({
+                    "status": "Đã tạm dừng dịch thuật.",
+                    "progress": int(((idx + 1) / total) * 100),
+                    "event": "paused",
+                    "current_chunk_idx": idx + 1
+                })
                 return
             
-            active_task["translated_chunks"].append(translation)
-            active_task["current_chunk_idx"] += 1
-            save_active_task_state()
+            session["translated_chunks"].append(translation)
+            session["current_chunk_idx"] += 1
+            save_session_state(session_id)
             
-            yield f"data: {json.dumps({
-                'status': f'Hoàn thành đoạn {idx + 1}/{total}',
-                'progress': int(((idx + 1) / total) * 100),
-                'event': 'chunk_completed',
-                'source_chunk': chunk,
-                'translated_chunk': translation
-            }, ensure_ascii=False)}\n\n"
+            await queue.put({
+                "status": f"Hoàn thành đoạn {idx + 1}/{total}",
+                "progress": int(((idx + 1) / total) * 100),
+                "event": "chunk_completed",
+                "source_chunk": chunk,
+                "translated_chunk": translation
+            })
             
         except Exception as e:
-            logger.error(f"Lỗi khi dịch đoạn {idx + 1}: {e}")
-            yield f"data: {json.dumps({
-                'status': f'Thất bại ở đoạn {idx + 1}: {str(e)}',
-                'progress': progress,
-                'event': 'error',
-                'error': str(e)
-            }, ensure_ascii=False)}\n\n"
+            logger.error(f"Lỗi khi dịch đoạn {idx + 1} trong session {session_id}: {e}")
+            await queue.put({
+                "status": f"Thất bại ở đoạn {idx + 1}: {str(e)}",
+                "progress": progress,
+                "event": "error",
+                "error": str(e)
+            })
             return
 
-    # Hoàn tất dịch toàn bộ
-    full_text = "\n\n".join(active_task["translated_chunks"])
-    # Xóa file trạng thái khi đã dịch xong hoàn toàn
-    if os.path.exists(STATE_FILE):
+    full_text = "\n\n".join(session["translated_chunks"])
+    delete_session_state(session_id)
+    
+    await queue.put({
+        "status": "Dịch hoàn tất!",
+        "progress": 100,
+        "event": "completed",
+        "full_translation": full_text
+    })
+
+async def event_generator(session_id: str):
+    session = active_sessions.get(session_id)
+    if not session:
+        yield f"data: {json.dumps({'status': 'Session không tồn tại.', 'event': 'error', 'error': 'Invalid session ID'}, ensure_ascii=False)}\n\n"
+        return
+        
+    queue = session["queue"]
+    
+    # Gửi sự kiện phục hồi (restore_state) cho client nếu có tiến trình trước đó
+    if session["current_chunk_idx"] > 0:
+        restore_data = {
+            'status': f'Khôi phục tiến trình dịch: {session["current_chunk_idx"]}/{session["total_chunks"]}',
+            'progress': int((session["current_chunk_idx"] / session["total_chunks"]) * 100),
+            'event': 'restore_state',
+            'current_chunk_idx': session["current_chunk_idx"],
+            'total_chunks': session["total_chunks"],
+            'chunks': session["chunks"][:session["current_chunk_idx"]],
+            'translated_chunks': session["translated_chunks"]
+        }
+        yield f"data: {json.dumps(restore_data, ensure_ascii=False)}\n\n"
+    
+    while True:
         try:
-            os.remove(STATE_FILE)
-        except Exception:
-            pass
-    active_task["task_id"] = None
-
-    yield f"data: {json.dumps({
-        'status': 'Dịch hoàn tất!',
-        'progress': 100,
-        'event': 'completed',
-        'full_translation': full_text
-    }, ensure_ascii=False)}\n\n"
-
+            event = await queue.get()
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if event["event"] in ["completed", "paused", "error"]:
+                break
+        except Exception as e:
+            logger.error(f"Lỗi trong event generator cho session {session_id}: {e}")
+            break
 
 @router.post("/translate")
 async def translate_endpoint(request: TranslateRequest, db: Session = Depends(get_db)):
     """
-    Dịch tiểu thuyết sử dụng cơ chế Server-Sent Events (SSE).
-    Liên tục cập nhật tiến độ cho Frontend (ví dụ: đang dịch đoạn 5/10)
-    và gửi kèm nội dung đoạn đã dịch xong.
+    Tạo một phiên dịch thuật mới, trả về session_id lập tức và chạy ngầm tiến trình dịch.
     """
     provider = request.provider.strip().lower()
     
-    # Lấy key tương ứng với từng provider
     key = request.api_key
     if not key:
         if provider == "gemini":
@@ -333,7 +389,6 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
             detail=f"Không tìm thấy API Key cho {request.provider}. Vui lòng thiết lập trong Cài đặt."
         )
 
-    # Chia đoạn văn bản
     chunks = novel_translator.smart_chunking(request.text)
     if not chunks:
         raise HTTPException(
@@ -341,7 +396,6 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
             detail="Văn bản nguồn rỗng hoặc không thể chia nhỏ."
         )
 
-    # Lấy Glossary từ DB hoặc request
     glossary_dict = {}
     if request.glossary_id is not None:
         terms = db.query(GlossaryTerm).filter(GlossaryTerm.collection_id == request.glossary_id).all()
@@ -349,10 +403,10 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
     elif request.glossary:
         glossary_dict = request.glossary
 
-    # Khởi tạo hoặc ghi đè active_task
     import uuid
-    active_task.update({
-        "task_id": str(uuid.uuid4()),
+    session_id = str(uuid.uuid4())
+    
+    active_sessions[session_id] = {
         "chunks": chunks,
         "translated_chunks": [],
         "current_chunk_idx": 0,
@@ -363,39 +417,57 @@ async def translate_endpoint(request: TranslateRequest, db: Session = Depends(ge
         "model": request.model,
         "source_lang": request.source_lang,
         "target_lang": request.target_lang,
-        "provider": provider
-    })
-    save_active_task_state()
+        "provider": provider,
+        "queue": asyncio.Queue()
+    }
+    save_session_state(session_id)
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    asyncio.create_task(run_translation_task(session_id))
 
+    return {"status": "started", "session_id": session_id}
+
+@router.get("/stream")
+async def stream_endpoint(session_id: str):
+    """
+    SSE stream endpoint để Frontend kết nối nhận tiến trình dịch thời gian thực.
+    """
+    if session_id not in active_sessions:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên dịch thuật này.")
+    return StreamingResponse(event_generator(session_id), media_type="text/event-stream")
 
 @router.post("/pause")
-async def pause_endpoint():
-    if active_task["task_id"] is None:
-        raise HTTPException(status_code=400, detail="Không có tiến trình dịch thuật nào đang chạy.")
-    active_task["is_paused"] = True
-    save_active_task_state()
+async def pause_endpoint(session_id: str):
+    session = active_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên dịch thuật này.")
+    
+    session["is_paused"] = True
+    save_session_state(session_id)
     return {
         "status": "success",
         "message": "Đã gửi yêu cầu tạm dừng.",
-        "current_chunk_idx": active_task["current_chunk_idx"],
-        "total_chunks": active_task["total_chunks"]
+        "current_chunk_idx": session["current_chunk_idx"],
+        "total_chunks": session["total_chunks"]
     }
 
-
 @router.post("/resume")
-async def resume_endpoint():
-    if active_task["task_id"] is None:
-        raise HTTPException(status_code=400, detail="Không có tiến trình nào để tiếp tục.")
+async def resume_endpoint(session_id: str, request: Optional[ResumeRequest] = None):
+    session = active_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phiên dịch thuật để tiếp tục.")
     
-    if not active_task["is_paused"]:
+    if not session["is_paused"]:
         return {"status": "ignored", "message": "Tiến trình dịch đang chạy, không cần resume."}
         
-    active_task["is_paused"] = False
-    save_active_task_state()
+    session["is_paused"] = False
+    if request and request.api_key:
+        session["api_key"] = request.api_key
+        
+    session["queue"] = asyncio.Queue()
+    save_session_state(session_id)
     
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    asyncio.create_task(run_translation_task(session_id))
+    return {"status": "resumed", "session_id": session_id}
 
 
 @router.post("/download")
