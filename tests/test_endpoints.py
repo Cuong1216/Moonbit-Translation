@@ -107,3 +107,15 @@ def test_translate_chunk_endpoint_success(mock_translate_chunk):
         use_cache=False
     )
 
+def test_state_endpoint_not_found():
+    response = client.get("/api/state/nonexistent_id")
+    assert response.status_code == 404
+    assert "Không tìm thấy phiên dịch thuật này" in response.json()["detail"]
+
+def test_state_endpoint_success(mock_session):
+    response = client.get(f"/api/state/{mock_session}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["direction"] == "horizontal"
+    assert response.json()["toc"] == []
+

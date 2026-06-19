@@ -293,7 +293,14 @@
                                         <table class="table table-dark table-bordered align-middle mb-0 d-none" id="split-screen-table" style="table-layout: fixed; width: 100%;">
                                             <thead class="table-secondary-dark sticky-top">
                                                 <tr>
-                                                    <th scope="col" style="width: 50%; padding: 10px 15px;">Bản Gốc (Source)</th>
+                                                    <th scope="col" style="width: 50%; padding: 10px 15px;">
+                                                        <div class="d-flex justify-content-between align-items-center">
+                                                            <span>Bản Gốc (Source)</span>
+                                                            <button id="btn-toggle-reading-mode" class="btn btn-outline-info btn-sm d-none" type="button" title="Chuyển chế độ đọc (Dọc/Ngang)">
+                                                                🔄 Chuyển chế độ đọc (Dọc/Ngang)
+                                                            </button>
+                                                        </div>
+                                                    </th>
                                                     <th scope="col" style="width: 50%; padding: 10px 15px;">Bản Dịch (Editable)</th>
                                                 </tr>
                                             </thead>

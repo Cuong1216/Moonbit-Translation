@@ -251,3 +251,25 @@ div.translated-chunk-input:focus {
 .tooltip-term.bg-success-subtle:hover {
     background-color: rgba(25, 135, 84, 0.3) !important;
 }
+
+/* Vertical text layout support */
+.vertical-text {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    overflow-x: auto;
+    white-space: pre;
+    height: 150px;
+    max-height: 200px;
+    display: inline-block;
+    padding-right: 5px;
+    border-right: 1px dashed var(--border-color);
+}
+
+.horizontal-forced {
+    writing-mode: horizontal-tb;
+    text-orientation: normal;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-size: 0.92rem;
+    line-height: 1.5;
+}
