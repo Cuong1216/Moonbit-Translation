@@ -350,3 +350,47 @@ async def test_gemini_translator_with_context(mock_list_models, mock_generative_
     system_instruction = kwargs.get("system_instruction", "")
     assert "Ngữ cảnh từ các đoạn trước: Previously translated paragraph." in system_instruction
 
+
+@patch("services.translator.httpx.AsyncClient")
+@pytest.mark.asyncio
+async def test_ollama_translator_success(mock_async_client_class):
+    mock_client = MagicMock()
+    mock_async_client_class.return_value = mock_client
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"response": "Đây là bản dịch từ Ollama."}
+    mock_response.raise_for_status = MagicMock()
+    
+    mock_client.post = AsyncMock(return_value=mock_response)
+
+    result = await novel_translator.translate_chunk(
+        chunk="Hello Ollama",
+        glossary_dict={},
+        api_key="ollama",
+        model_name="llama3",
+        source_lang="Tiếng Anh",
+        target_lang="Tiếng Việt",
+        provider="ollama",
+        use_cache=False
+    )
+
+    assert result == "Đây là bản dịch từ Ollama."
+    mock_client.post.assert_called_once()
+    kwargs = mock_client.post.call_args[1]
+    
+    json_data = kwargs.get("json", {})
+    assert json_data["model"] == "llama3"
+    assert json_data["prompt"] == "Hello Ollama"
+    assert json_data["stream"] is False
+    assert "Tiếng Anh" in json_data["system"]
+    assert "Tiếng Việt" in json_data["system"]
+
+
+def test_translator_factory_ollama():
+    from services.translator import TranslatorFactory, LocalTranslator
+    translator = TranslatorFactory.get_translator("ollama")
+    assert isinstance(translator, LocalTranslator)
+

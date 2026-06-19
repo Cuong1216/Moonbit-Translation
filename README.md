@@ -1,6 +1,6 @@
-# Gemini Novel Translator & Glossary Builder
+# Moonbit Translation
 
-Hệ thống dịch thuật tiểu thuyết chuyên nghiệp và tự động trích xuất thuật ngữ (Glossary) cục bộ (Web App Local), được tối ưu hóa bằng Google Gemini API, Anthropic Claude, và OpenRouter. Dự án được xây dựng với mục tiêu nâng cao độ chính xác, tính nhất quán của bản dịch tiểu thuyết dài tập (như tên nhân vật, địa danh, chiêu thức) thông qua việc áp dụng bảng thuật ngữ động.
+Hệ thống dịch thuật tiểu thuyết chuyên nghiệp và tự động trích xuất thuật ngữ (Glossary) cục bộ (Web App Local), được tối ưu hóa bằng Google Gemini API, Anthropic Claude, OpenRouter, và Ollama. Dự án được xây dựng với mục tiêu nâng cao độ chính xác, tính nhất quán của bản dịch tiểu thuyết dài tập (như tên nhân vật, địa danh, chiêu thức) thông qua việc áp dụng bảng thuật ngữ động.
 
 ---
 

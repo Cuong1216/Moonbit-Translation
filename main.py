@@ -14,13 +14,27 @@ init_db()
 from api.routes import router as api_router
 
 app = FastAPI(
-    title="Gemini Novel Translator & Glossary",
-    description="Web App Local chuyên dịch tiểu thuyết và quản lý thuật ngữ bằng Google Gemini API",
+    title="Moonbit Translation",
+    description="Web App Local chuyên dịch tiểu thuyết và quản lý thuật ngữ bằng Google Gemini API và Local Ollama",
     version="1.0.0"
 )
 
 # Đăng ký các API Routes
 app.include_router(api_router)
+
+@app.on_event("startup")
+async def startup_event():
+    import httpx
+    import logging
+    logger = logging.getLogger("NovelTranslator")
+    try:
+        async with httpx.AsyncClient(timeout=1.0) as client:
+            response = await client.get("http://localhost:11434/")
+            if response.status_code == 200:
+                logger.info("Ollama is running. Local AI is ready to use!")
+                print("Ollama is running. Local AI is ready to use!")
+    except Exception:
+        pass
 
 # Cấu hình mount thư mục static để phục vụ CSS, JS, Images
 # Thư mục static phải tồn tại trước khi khởi chạy

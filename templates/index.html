@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini Novel Translator & Glossary Builder</title>
+    <title>Moonbit Translation</title>
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <!-- Google Fonts -->
@@ -23,7 +23,7 @@
                     <i class="fa-solid fa-wand-magic-sparkles fa-lg"></i>
                 </div>
                 <div>
-                    <h1 class="h3 fw-bold mb-0 text-purple-glow">GeminiTrans</h1>
+                    <h1 class="h3 fw-bold mb-0 text-purple-glow">Moonbit Translation</h1>
                     <small class="text-secondary">Hệ thống dịch tiểu thuyết và trích xuất thuật ngữ bằng AI</small>
                 </div>
             </div>
@@ -210,6 +210,7 @@
                                             <option value="gemini" selected>Google Gemini</option>
                                             <option value="claude">Anthropic Claude</option>
                                             <option value="openrouter">OpenRouter</option>
+                                            <option value="ollama">Ollama (Local AI)</option>
                                         </select>
                                     </div>
 
@@ -308,6 +309,36 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Retranslate Modal -->
+    <div class="modal fade" id="retranslateModal" tabindex="-1" aria-labelledby="retranslateModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-secondary-dark border-secondary text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-purple-glow d-flex align-items-center gap-2" id="retranslateModalLabel">
+                        <i class="fa-solid fa-arrows-rotate"></i> Dịch lại đoạn văn
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label text-secondary small fw-semibold">Đoạn văn gốc (Source Text):</label>
+                        <div id="retranslate-source-preview" class="p-3 bg-dark rounded border border-secondary text-light small font-monospace" style="max-height: 150px; overflow-y: auto; white-space: pre-wrap; line-height: 1.5;"></div>
+                    </div>
+                    <div class="mb-0">
+                        <label for="custom-prompt-input" class="form-label text-secondary small fw-semibold">Prompt tùy chỉnh (Lời nhắc bổ sung):</label>
+                        <textarea id="custom-prompt-input" class="form-control bg-dark text-light border-secondary" rows="3" placeholder="Ví dụ: Dịch lại đoạn này với giọng điệu hài hước hơn, đổi xưng hô xưng tôi - em..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-purple fw-semibold" id="btn-confirm-retranslate">
+                        <i class="fa-solid fa-check me-1"></i> Xác nhận
+                    </button>
                 </div>
             </div>
         </div>

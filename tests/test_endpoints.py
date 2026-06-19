@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from main import app
 from api.routes import active_sessions, delete_session_state
@@ -73,4 +74,36 @@ def test_stream_endpoint_success(mock_session):
     with client.stream("GET", f"/api/stream?session_id={mock_session}") as response:
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
+
+@patch("api.routes.novel_translator.translate_chunk", new_callable=AsyncMock)
+def test_translate_chunk_endpoint_success(mock_translate_chunk):
+    mock_translate_chunk.return_value = "Bản dịch cụ thể thành công."
+    
+    payload = {
+        "source_text": "Hello world",
+        "custom_prompt": "Dịch vui vẻ",
+        "model_name": "gemini-1.5-flash",
+        "api_key": "fake-api-key",
+        "provider": "gemini",
+        "source_lang": "Tiếng Anh",
+        "target_lang": "Tiếng Việt"
+    }
+    
+    response = client.post("/api/translate-chunk", json=payload)
+    assert response.status_code == 200
+    assert response.json() == {"translated_text": "Bản dịch cụ thể thành công."}
+    
+    mock_translate_chunk.assert_called_once_with(
+        chunk="Hello world",
+        glossary_dict={},
+        api_key="fake-api-key",
+        model_name="gemini-1.5-flash",
+        source_lang="Tiếng Anh",
+        target_lang="Tiếng Việt",
+        provider="gemini",
+        use_agentic=False,
+        previous_context="",
+        custom_prompt="Dịch vui vẻ",
+        use_cache=False
+    )
 

@@ -3,8 +3,9 @@ import re
 import time
 import logging
 import asyncio
+import httpx
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import google.generativeai as genai
 import google.api_core.exceptions
 from anthropic import Anthropic, AsyncAnthropic
@@ -94,6 +95,7 @@ class GeminiTranslator(BaseTranslator):
         glossary_dict = context.get("glossary", {})
         source_lang = context.get("source_lang", "Trung Quốc")
         target_lang = context.get("target_lang", "Tiếng Việt")
+        custom_prompt = context.get("custom_prompt")
 
         if not api_key:
             raise ValueError("Cần cung cấp Gemini API Key để dịch thuật.")
@@ -102,11 +104,13 @@ class GeminiTranslator(BaseTranslator):
 
         glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
         context_str = previous_context if previous_context else "Không có"
+        custom_prompt_str = f"\nYêu cầu đặc biệt bổ sung từ người dùng cho bản dịch này: {custom_prompt}\n" if custom_prompt else ""
 
         system_prompt = (
             f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
             f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
             f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
+            f"{custom_prompt_str}"
             "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
         )
 
@@ -154,17 +158,20 @@ class ClaudeTranslator(BaseTranslator):
         glossary_dict = context.get("glossary", {})
         source_lang = context.get("source_lang", "Trung Quốc")
         target_lang = context.get("target_lang", "Tiếng Việt")
+        custom_prompt = context.get("custom_prompt")
 
         if not api_key:
             raise ValueError("Cần cung cấp Claude API Key để dịch thuật.")
 
         glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
         context_str = previous_context if previous_context else "Không có"
+        custom_prompt_str = f"\nYêu cầu đặc biệt bổ sung từ người dùng cho bản dịch này: {custom_prompt}\n" if custom_prompt else ""
 
         system_prompt = (
             f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
             f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
             f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
+            f"{custom_prompt_str}"
             "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
         )
 
@@ -234,6 +241,7 @@ class OpenRouterTranslator(BaseTranslator):
         source_lang = context.get("source_lang", "Trung Quốc")
         target_lang = context.get("target_lang", "Tiếng Việt")
         use_agentic = context.get("use_agentic", False)
+        custom_prompt = context.get("custom_prompt")
 
         if not api_key:
             raise ValueError("Cần cung cấp OpenRouter API Key để dịch thuật.")
@@ -244,6 +252,7 @@ class OpenRouterTranslator(BaseTranslator):
         )
 
         context_str = previous_context if previous_context else "Không có"
+        custom_prompt_str = f"\nYêu cầu đặc biệt bổ sung từ người dùng cho bản dịch này: {custom_prompt}\n" if custom_prompt else ""
 
         if use_agentic:
             # Vòng 1: Dịch thô
@@ -261,6 +270,8 @@ class OpenRouterTranslator(BaseTranslator):
                 f"Biên tập lại bản dịch thô sau cho văn phong thuần Việt, giữ nguyên ý nghĩa gốc, sửa lỗi ngữ pháp. "
                 f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường."
             )
+            if custom_prompt:
+                edit_prompt += f"\n\n{custom_prompt_str.strip()}"
             logger.info(f"OpenRouter Agentic Vòng 2 (Biên tập) với model: {edit_model}")
             final_translation = await self._call_api_with_backoff(client, edit_model, edit_prompt, raw_translation)
             
@@ -271,9 +282,64 @@ class OpenRouterTranslator(BaseTranslator):
                 f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
                 f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
                 f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
+                f"{custom_prompt_str}"
                 "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
             )
             return await self._call_api_with_backoff(client, model_name, system_prompt, chunk)
+
+
+class LocalTranslator(BaseTranslator):
+    async def _translate_chunk_api(self, chunk: str, context: Dict[str, Any], previous_context: str = "") -> str:
+        model_name = context.get("model", "llama3")
+        glossary_dict = context.get("glossary", {})
+        source_lang = context.get("source_lang", "Trung Quốc")
+        target_lang = context.get("target_lang", "Tiếng Việt")
+        custom_prompt = context.get("custom_prompt")
+
+        glossary_str = "\n".join([f"- {src} -> {tgt}" for src, tgt in glossary_dict.items()]) if glossary_dict else "Không có"
+        context_str = previous_context if previous_context else "Không có"
+        custom_prompt_str = f"\nYêu cầu đặc biệt bổ sung từ người dùng cho bản dịch này: {custom_prompt}\n" if custom_prompt else ""
+
+        system_prompt = (
+            f"Bạn là một dịch giả chuyên nghiệp. Hãy dịch văn bản sau từ {source_lang} sang {target_lang}. "
+            f"Bắt buộc tuân thủ bảng thuật ngữ sau:\n{glossary_str}\n\n"
+            f"Ngữ cảnh từ các đoạn trước: {context_str}. Hãy tham chiếu cách xưng hô và bối cảnh này để dịch đoạn tiếp theo cho đồng nhất. Nếu không có ngữ cảnh, hãy dịch bình thường.\n\n"
+            f"{custom_prompt_str}"
+            "Giữ nguyên định dạng xuống dòng và không giải thích hay thêm bớt nội dung ngoài bản dịch."
+        )
+
+        max_retries = 3
+        retry_delay = 5
+
+        for attempt in range(1, max_retries + 2):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        "http://localhost:11434/api/generate",
+                        json={
+                            "model": model_name,
+                            "prompt": chunk,
+                            "system": system_prompt,
+                            "stream": False
+                        }
+                    )
+                    response.raise_for_status()
+                    res_json = response.json()
+                    translated_text = res_json.get("response", "")
+                    if translated_text:
+                        return translated_text.strip()
+                    raise ValueError("Ollama API trả về phản hồi rỗng.")
+            except Exception as e:
+                if attempt > max_retries:
+                    logger.error(f"Đã thử lại {max_retries} lần nhưng vẫn thất bại khi dịch bằng Ollama. Lỗi: {e}")
+                    raise e
+                logger.warning(
+                    f"Gặp lỗi khi gọi Ollama API (Lần thử {attempt}/{max_retries + 1}): {e}. "
+                    f"Đang chờ {retry_delay} giây trước khi thử lại..."
+                )
+                await asyncio.sleep(retry_delay)
+
+        return ""
 
 
 class TranslatorFactory:
@@ -289,6 +355,8 @@ class TranslatorFactory:
             return ClaudeTranslator()
         elif provider_clean == "openrouter":
             return OpenRouterTranslator()
+        elif provider_clean == "ollama":
+            return LocalTranslator()
         else:
             raise ValueError(f"Nhà cung cấp AI không được hỗ trợ: {provider}")
 
@@ -353,7 +421,7 @@ class NovelTranslator:
         logger.info(f"Đã chia văn bản thành {len(chunks)} đoạn dịch thông minh.")
         return chunks
 
-    async def translate_chunk(self, chunk: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini", use_agentic: bool = False, previous_context: str = "") -> str:
+    async def translate_chunk(self, chunk: str, glossary_dict: Dict[str, str], api_key: str, model_name: str = "gemini-1.5-flash", source_lang: str = "Trung Quốc", target_lang: str = "Tiếng Việt", provider: str = "gemini", use_agentic: bool = False, previous_context: str = "", custom_prompt: Optional[str] = None, use_cache: bool = True) -> str:
         """
         Dịch một đoạn sử dụng provider tương ứng.
         """
@@ -364,7 +432,9 @@ class NovelTranslator:
             "glossary": glossary_dict,
             "source_lang": source_lang,
             "target_lang": target_lang,
-            "use_agentic": use_agentic
+            "use_agentic": use_agentic,
+            "custom_prompt": custom_prompt,
+            "use_cache": use_cache
         }
         return await translator.translate_chunk(chunk, context, previous_context)
 
